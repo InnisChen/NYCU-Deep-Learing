@@ -15,8 +15,8 @@ def train(args):
     print(f"Device: {device}")
 
     # ── DataLoader ───────────────────────────────────────────────────
-    train_loader = get_loader(args.data_path, mode="train", batch_size=args.batch_size)
-    valid_loader = get_loader(args.data_path, mode="valid", batch_size=args.batch_size)
+    train_loader = get_loader(args.data_path, mode="train", batch_size=args.batch_size, split_dir=args.split_dir)
+    valid_loader = get_loader(args.data_path, mode="valid", batch_size=args.batch_size, split_dir=args.split_dir)
     print(f"Train batches: {len(train_loader)}, Valid batches: {len(valid_loader)}")
 
     # ── Model ────────────────────────────────────────────────────────
@@ -86,6 +86,8 @@ if __name__ == "__main__":
     parser.add_argument("--model",         type=str,   default="unet",
                         choices=["unet", "resnet34_unet"])
     parser.add_argument("--data_path",     type=str,   default="dataset/oxford-iiit-pet")
+    parser.add_argument("--split_dir",     type=str,   default=None,
+                        help="Kaggle 競賽 split 資料夾（含 train.txt/val.txt/test_*.txt）")
     parser.add_argument("--save_path",     type=str,   default="saved_models")
     parser.add_argument("--epochs",        type=int,   default=30)
     parser.add_argument("--batch_size",    type=int,   default=8)
