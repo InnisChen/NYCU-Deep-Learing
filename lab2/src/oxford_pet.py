@@ -9,10 +9,12 @@ from torchvision.transforms import InterpolationMode
 import random
 
 class OxfordPetDataset(Dataset):
-    def __init__(self, root, mode="train", transform=None):
+    def __init__(self, root, mode="train", transform=None, split_dir=None):
         """
-        root  : dataset/oxford-iiit-pet/ 的路徑
-        mode  : "train", "valid", "test"
+        root      : dataset/oxford-iiit-pet/ 的路徑
+        mode      : "train", "valid", "test"
+        split_dir : Kaggle 競賽資料夾路徑（含 train.txt / val.txt / test_*.txt）
+                    若為 None，使用 Oxford 官方 split
         """
         assert mode in ["train", "valid", "test"]
         self.root = root
@@ -22,13 +24,23 @@ class OxfordPetDataset(Dataset):
         self.images_dir = os.path.join(root, "images")
         self.masks_dir  = os.path.join(root, "annotations", "trimaps")
 
-        # 讀取官方 split 清單
-        if mode == "train":
-            list_file = os.path.join(root, "annotations", "trainval.txt")
-        elif mode == "valid":
-            list_file = os.path.join(root, "annotations", "test.txt")
-        else:  # test (Kaggle inference)
-            list_file = os.path.join(root, "annotations", "test.txt")
+        # 決定 split 清單路徑
+        if split_dir is not None:
+            if mode == "train":
+                list_file = os.path.join(split_dir, "train.txt")
+            elif mode == "valid":
+                list_file = os.path.join(split_dir, "val.txt")
+            else:  # test
+                # 自動找 test_*.txt
+                candidates = [f for f in os.listdir(split_dir) if f.startswith("test_")]
+                assert candidates, f"找不到 test_*.txt in {split_dir}"
+                list_file = os.path.join(split_dir, candidates[0])
+        else:
+            # 使用 Oxford 官方 split
+            if mode == "train":
+                list_file = os.path.join(root, "annotations", "trainval.txt")
+            else:
+                list_file = os.path.join(root, "annotations", "test.txt")
 
         self.filenames = []
         with open(list_file, "r") as f:
@@ -127,11 +139,11 @@ class OxfordPetDataset(Dataset):
 # ------------------------------------------------------------------ #
 #  DataLoader 工廠函式（給 train.py / evaluate.py / inference.py 呼叫）#
 # ------------------------------------------------------------------ #
-def get_loader(root, mode, batch_size=8, num_workers=0, shuffle=None):
+def get_loader(root, mode, batch_size=8, num_workers=0, shuffle=None, split_dir=None):
     if shuffle is None:
         shuffle = (mode == "train")
 
-    dataset = OxfordPetDataset(root=root, mode=mode)
+    dataset = OxfordPetDataset(root=root, mode=mode, split_dir=split_dir)
     loader  = DataLoader(
         dataset,
         batch_size=batch_size,
