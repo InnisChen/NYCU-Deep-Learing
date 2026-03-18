@@ -1,9 +1,6 @@
 # Dataset（太大，存在 Colab）
 dataset/
 
-# Kaggle 競賽資料夾
-nycu-2026-spring-dl-lab2-unet/
-binary-semantic-segmentation-res-net-34-u-net/
 
 # 訓練好的模型權重
 saved_models/
