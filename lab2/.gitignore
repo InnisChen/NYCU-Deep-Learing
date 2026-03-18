@@ -1,0 +1,23 @@
+# Dataset（太大，存在 Colab）
+dataset/
+
+# 訓練好的模型權重
+saved_models/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb
+
+# 系統檔
+.DS_Store
+Thumbs.db
+
+# 環境
+.env
+venv/
