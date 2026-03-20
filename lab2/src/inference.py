@@ -72,7 +72,7 @@ if __name__ == "__main__":
     parser.add_argument("--model",      type=str, default="unet",
                         choices=["unet", "resnet34_unet"])
     parser.add_argument("--data_path",  type=str, default="dataset/oxford-iiit-pet")
-    parser.add_argument("--split_dir",  type=str, default=None,
+    parser.add_argument("--split_dir",  type=str, default="nycu-2026-spring-dl-lab2-unet",
                         help="Kaggle split 資料夾（含 test_*.txt）")
     parser.add_argument("--weight",     type=str, default="saved_models/unet_best.pth")
     parser.add_argument("--output",     type=str, default="submission.csv")
