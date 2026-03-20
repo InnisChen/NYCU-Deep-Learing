@@ -3,6 +3,7 @@ import argparse
 import numpy as np
 import pandas as pd
 import torch
+from PIL import Image
 from tqdm import tqdm
 
 from oxford_pet import get_loader
@@ -51,13 +52,18 @@ def run_inference(args):
     # ── Inference ────────────────────────────────────────────────────
     rows = []
     with torch.no_grad():
-        for images, names in tqdm(test_loader, desc="Inference"):
+        for images, names, orig_sizes in tqdm(test_loader, desc="Inference"):
             images = images.to(device)
             outputs = torch.sigmoid(model(images))          # (B,1,H,W)
             preds = (outputs > 0.5).squeeze(1).cpu().numpy().astype(np.uint8)
 
-            for name, pred in zip(names, preds):
-                rle = mask_to_rle(pred)
+            for name, pred, (orig_w, orig_h) in zip(names, preds, zip(*orig_sizes)):
+                # resize mask 回原始圖片尺寸
+                pred_img = Image.fromarray(pred).resize(
+                    (orig_w.item(), orig_h.item()), resample=Image.NEAREST
+                )
+                pred_resized = np.array(pred_img, dtype=np.uint8)
+                rle = mask_to_rle(pred_resized)
                 rows.append({"image_id": name, "encoded_mask": rle})
 
     # ── Save CSV ─────────────────────────────────────────────────────

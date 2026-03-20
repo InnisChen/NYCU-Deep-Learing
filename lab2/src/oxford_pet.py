@@ -60,9 +60,10 @@ class OxfordPetDataset(Dataset):
         image = Image.open(img_path).convert("RGB")
 
         if self.mode == "test":
-            # test set 沒有 mask，只回傳圖片
+            # test set 沒有 mask，只回傳圖片和原始尺寸
+            orig_size = image.size  # (W, H)
             image = self._transform_image(image)
-            return image, name
+            return image, name, orig_size
 
         # 載入 trimap mask
         mask_path = os.path.join(self.masks_dir, name + ".png")
