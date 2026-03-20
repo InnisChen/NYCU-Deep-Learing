@@ -89,7 +89,7 @@ if __name__ == "__main__":
     parser.add_argument("--split_dir",     type=str,   default=None,
                         help="Kaggle 競賽 split 資料夾（含 train.txt/val.txt/test_*.txt）")
     parser.add_argument("--save_path",     type=str,   default="saved_models")
-    parser.add_argument("--epochs",        type=int,   default=30)
+    parser.add_argument("--epochs",        type=int,   default=50)
     parser.add_argument("--batch_size",    type=int,   default=8)
     parser.add_argument("--learning_rate", type=float, default=1e-3)
     args = parser.parse_args()
