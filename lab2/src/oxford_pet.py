@@ -1,5 +1,27 @@
 import os
+import urllib.request
+import tarfile
 import numpy as np
+
+URLS = {
+    "images": "https://www.robots.ox.ac.uk/~vgg/data/pets/data/images.tar.gz",
+    "annotations": "https://www.robots.ox.ac.uk/~vgg/data/pets/data/annotations.tar.gz",
+}
+
+def download_dataset(root):
+    os.makedirs(root, exist_ok=True)
+    for name, url in URLS.items():
+        filename = os.path.join(root, url.split("/")[-1])
+        if not os.path.exists(filename):
+            print(f"Downloading {name}...")
+            urllib.request.urlretrieve(url, filename)
+            print(f"Extracting {name}...")
+            with tarfile.open(filename, "r:gz") as tar:
+                tar.extractall(root)
+            print(f"{name} done.")
+        else:
+            print(f"{name} already exists, skipping.")
+
 from PIL import Image
 import torch
 from torch.utils.data import Dataset, DataLoader
@@ -9,12 +31,14 @@ from torchvision.transforms import InterpolationMode
 import random
 
 class OxfordPetDataset(Dataset):
-    def __init__(self, root, mode="train", transform=None, split_dir=None):
+    def __init__(self, root, mode="train", transform=None, split_dir=None, splits_dir=None):
         """
         root      : dataset/oxford-iiit-pet/ 的路徑
         mode      : "train", "valid", "test"
         split_dir : Kaggle 競賽資料夾路徑（含 train.txt / val.txt / test_*.txt）
                     若為 None，使用 Oxford 官方 split
+        splits_dir: 相對於 annotations/ 的子目錄（含 train.txt / val.txt / test_unet.txt）
+                    若提供，優先使用此路徑
         """
         assert mode in ["train", "valid", "test"]
         self.root = root
@@ -23,6 +47,23 @@ class OxfordPetDataset(Dataset):
 
         self.images_dir = os.path.join(root, "images")
         self.masks_dir  = os.path.join(root, "annotations", "trimaps")
+
+        # splits_dir: subdirectory under annotations/ (new parameter)
+        if splits_dir is not None:
+            splits_base = os.path.join(root, "annotations", splits_dir)
+            if mode == "train":
+                list_file = os.path.join(splits_base, "train.txt")
+            elif mode == "valid":
+                list_file = os.path.join(splits_base, "val.txt")
+            else:  # test
+                list_file = os.path.join(splits_base, "test_unet.txt")
+            self.filenames = []
+            with open(list_file, "r") as f:
+                for line in f:
+                    parts = line.strip().split()
+                    if len(parts) >= 1 and not parts[0].startswith("#"):
+                        self.filenames.append(parts[0])
+            return
 
         # 決定 split 清單路徑
         if split_dir is not None:
@@ -150,11 +191,22 @@ class OxfordPetDataset(Dataset):
 # ------------------------------------------------------------------ #
 #  DataLoader 工廠函式（給 train.py / evaluate.py / inference.py 呼叫）#
 # ------------------------------------------------------------------ #
-def get_loader(root, mode, batch_size=8, num_workers=2, shuffle=None, split_dir=None):
+def load_dataset(root, mode, splits_dir=None):
+    """
+    Returns OxfordPetDataset.
+    splits_dir: if provided, look for train.txt/val.txt/test_unet.txt
+                inside os.path.join(root, 'annotations', splits_dir)
+                instead of the default location.
+    """
+    dataset = OxfordPetDataset(root=root, mode=mode, splits_dir=splits_dir)
+    return dataset
+
+
+def get_loader(root, mode, batch_size=8, num_workers=2, shuffle=None, split_dir=None, splits_dir=None):
     if shuffle is None:
         shuffle = (mode == "train")
 
-    dataset = OxfordPetDataset(root=root, mode=mode, split_dir=split_dir)
+    dataset = OxfordPetDataset(root=root, mode=mode, split_dir=split_dir, splits_dir=splits_dir)
     loader  = DataLoader(
         dataset,
         batch_size=batch_size,
