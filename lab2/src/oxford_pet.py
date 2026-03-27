@@ -24,13 +24,26 @@ class OxfordPetDataset(Dataset):
         self.images_dir = os.path.join(root, "images")
         self.masks_dir  = os.path.join(root, "annotations", "trimaps")
 
-        # 決定 split 清單路徑（使用 Kaggle 競賽提供的 split 檔案）
-        if mode == "train":
-            list_file = os.path.join(root, "annotations", "train.txt")
-        elif mode == "valid":
-            list_file = os.path.join(root, "annotations", "val.txt")
-        else:  # test
-            list_file = os.path.join(root, "annotations", "test_unet.txt")
+        # 決定 split 清單路徑
+        if split_dir is not None:
+            # 使用 Kaggle 競賽提供的 split 資料夾
+            if mode == "train":
+                list_file = os.path.join(split_dir, "train.txt")
+            elif mode == "valid":
+                list_file = os.path.join(split_dir, "val.txt")
+            else:  # test — 自動找 test*.txt
+                candidates = [f for f in os.listdir(split_dir)
+                              if f.startswith("test") and f.endswith(".txt")]
+                assert candidates, f"No test*.txt found in {split_dir}"
+                list_file = os.path.join(split_dir, sorted(candidates)[0])
+        else:
+            # fallback：Oxford 官方 split
+            if mode == "train":
+                list_file = os.path.join(root, "annotations", "trainval.txt")
+            elif mode == "valid":
+                list_file = os.path.join(root, "annotations", "trainval.txt")
+            else:
+                list_file = os.path.join(root, "annotations", "test.txt")
 
         self.filenames = []
         with open(list_file, "r") as f:
