@@ -14,6 +14,7 @@ __pycache__/
 # Jupyter
 .ipynb_checkpoints/
 *.ipynb
+!lab2_colab.ipynb
 
 # 系統檔
 .DS_Store
