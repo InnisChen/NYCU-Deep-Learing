@@ -138,7 +138,8 @@ class OxfordPetDataset(Dataset):
     # ------------------------------------------------------------------ #
     def _apply_transforms(self, image, mask):
         """資料前處理 + Augmentation（只在 train 做增強）"""
-        target_size = (256, 256)
+        #target_size = (256, 256)
+        target_size = (512, 512)
 
         # 1. Resize
         image = TF.resize(image, target_size)
@@ -178,7 +179,8 @@ class OxfordPetDataset(Dataset):
 
     def _transform_image(self, image):
         """test set 只做 resize + normalize"""
-        image = TF.resize(image, (256, 256))
+        # image = TF.resize(image, (256, 256))
+        image = TF.resize(image, (512, 512))
         image = TF.to_tensor(image)
         image = TF.normalize(
             image,
