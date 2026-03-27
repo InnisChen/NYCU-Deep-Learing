@@ -2,6 +2,7 @@ import os
 import argparse
 import torch
 import torch.nn as nn
+from torch.amp import autocast, GradScaler
 from tqdm import tqdm
 
 from oxford_pet import get_loader
@@ -40,6 +41,7 @@ def train(args):
     # ── Loss & Optimizer ─────────────────────────────────────────────
     criterion = nn.BCEWithLogitsLoss()
     optimizer = torch.optim.Adam(model.parameters(), lr=args.learning_rate)
+    scaler = GradScaler('cuda')
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
         optimizer, mode="max", factor=0.5, patience=5
     )
@@ -58,10 +60,12 @@ def train(args):
             masks  = masks.to(device)
 
             optimizer.zero_grad()
-            outputs = model(images)
-            loss = criterion(outputs, masks)
-            loss.backward()
-            optimizer.step()
+            with autocast('cuda'):
+                outputs = model(images)
+                loss = criterion(outputs, masks)
+            scaler.scale(loss).backward()
+            scaler.step(optimizer)
+            scaler.update()
             train_loss += loss.item()
 
         train_loss /= len(train_loader)
@@ -73,7 +77,8 @@ def train(args):
             for images, masks in tqdm(valid_loader, desc=f"Epoch {epoch}/{args.epochs} [valid]", leave=False):
                 images = images.to(device)
                 masks  = masks.to(device)
-                outputs = model(images)
+                with autocast('cuda'):
+                    outputs = model(images)
                 val_dice += dice_score(outputs, masks)
 
         val_dice /= len(valid_loader)
