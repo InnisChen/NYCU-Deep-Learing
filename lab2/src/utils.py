@@ -1,4 +1,5 @@
 import torch
+import torch.nn.functional as F
 
 
 def dice_score(pred_logits, target, threshold=0.5):
@@ -13,3 +14,24 @@ def dice_score(pred_logits, target, threshold=0.5):
     gt_size      = target.sum(dim=(1, 2, 3))
     dice = (2.0 * intersection) / (pred_size + gt_size + 1e-8)
     return dice.mean().item()
+
+
+def dice_loss(pred_logits, target):
+    """
+    Soft Dice loss（可微分，適合 training）
+    pred_logits : (B, 1, H, W)  未經 sigmoid
+    target      : (B, 1, H, W)  float, 0 or 1
+    """
+    pred = torch.sigmoid(pred_logits)
+    intersection = (pred * target).sum(dim=(1, 2, 3))
+    pred_size    = pred.sum(dim=(1, 2, 3))
+    gt_size      = target.sum(dim=(1, 2, 3))
+    dice = (2.0 * intersection + 1.0) / (pred_size + gt_size + 1.0)
+    return 1.0 - dice.mean()
+
+
+def bce_dice_loss(pred_logits, target, bce_weight=0.5):
+    """BCE + Dice 組合 loss，預設各占 50%"""
+    bce = F.binary_cross_entropy_with_logits(pred_logits, target)
+    dl  = dice_loss(pred_logits, target)
+    return bce_weight * bce + (1.0 - bce_weight) * dl

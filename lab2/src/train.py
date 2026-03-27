@@ -1,14 +1,13 @@
 import os
 import argparse
 import torch
-import torch.nn as nn
 from torch.amp import autocast, GradScaler
 from tqdm import tqdm
 
 from oxford_pet import get_loader
 from models.unet import UNet
 from models.resnet34_unet import ResNet34UNet
-from utils import dice_score
+from utils import dice_score, bce_dice_loss
 
 
 SPLIT_DIR_MAP = {
@@ -39,7 +38,7 @@ def train(args):
     print(f"Model: {args.model}  |  Params: {sum(p.numel() for p in model.parameters()):,}")
 
     # ── Loss & Optimizer ─────────────────────────────────────────────
-    criterion = nn.BCEWithLogitsLoss()
+    criterion = bce_dice_loss   # BCE + Dice，避免模型 collapse 到全背景
     optimizer = torch.optim.Adam(model.parameters(), lr=args.learning_rate)
     scaler = GradScaler('cuda')
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
