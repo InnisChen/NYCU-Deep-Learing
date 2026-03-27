@@ -97,7 +97,9 @@ class UNet(nn.Module):
         x = self.dec1(x)                    # (B,   64, 68,  68)
 
         x = self.out_conv(x)                # (B,    1, 68,  68)
-        return F.interpolate(x, size=(256, 256), mode='bilinear', align_corners=False)
+        # return F.interpolate(x, size=(256, 256), mode='bilinear', align_corners=False)
+        return F.interpolate(x, size=(512, 512), mode='bilinear', align_corners=False)
+    
 
 
 if __name__ == "__main__":
