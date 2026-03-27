@@ -150,7 +150,7 @@ class OxfordPetDataset(Dataset):
 # ------------------------------------------------------------------ #
 #  DataLoader 工廠函式（給 train.py / evaluate.py / inference.py 呼叫）#
 # ------------------------------------------------------------------ #
-def get_loader(root, mode, batch_size=8, num_workers=4, shuffle=None, split_dir=None):
+def get_loader(root, mode, batch_size=8, num_workers=2, shuffle=None, split_dir=None):
     if shuffle is None:
         shuffle = (mode == "train")
 
