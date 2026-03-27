@@ -23,3 +23,6 @@ Thumbs.db
 # 環境
 .env
 venv/
+
+# Claude Code 內部記憶
+.claude/

@@ -37,11 +37,18 @@ class OxfordPetDataset(Dataset):
                 assert candidates, f"No test*.txt found in {split_dir}"
                 list_file = os.path.join(split_dir, sorted(candidates)[0])
         else:
-            # fallback：Oxford 官方 split
-            if mode == "train":
-                list_file = os.path.join(root, "annotations", "trainval.txt")
-            elif mode == "valid":
-                list_file = os.path.join(root, "annotations", "trainval.txt")
+            # fallback：Oxford 官方 split（trainval.txt 做 80/20 切分）
+            if mode in ("train", "valid"):
+                trainval_file = os.path.join(root, "annotations", "trainval.txt")
+                all_names = []
+                with open(trainval_file, "r") as f:
+                    for line in f:
+                        parts = line.strip().split()
+                        if len(parts) >= 1 and not parts[0].startswith("#"):
+                            all_names.append(parts[0])
+                split_idx = int(len(all_names) * 0.8)
+                self.filenames = all_names[:split_idx] if mode == "train" else all_names[split_idx:]
+                return
             else:
                 list_file = os.path.join(root, "annotations", "test.txt")
 

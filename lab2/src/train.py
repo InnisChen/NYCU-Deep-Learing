@@ -10,7 +10,17 @@ from models.resnet34_unet import ResNet34UNet
 from utils import dice_score
 
 
+SPLIT_DIR_MAP = {
+    "unet":          "nycu-2026-spring-dl-lab2-unet",
+    "resnet34_unet": "binary-semantic-segmentation-res-net-34-u-net",
+}
+
+
 def train(args):
+    if args.split_dir is None:
+        args.split_dir = SPLIT_DIR_MAP[args.model]
+        print(f"Auto-selected split_dir: {args.split_dir}")
+
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Device: {device}")
 
