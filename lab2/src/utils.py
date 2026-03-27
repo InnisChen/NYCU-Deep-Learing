@@ -22,7 +22,8 @@ def dice_loss(pred_logits, target):
     pred_logits : (B, 1, H, W)  未經 sigmoid
     target      : (B, 1, H, W)  float, 0 or 1
     """
-    pred = torch.sigmoid(pred_logits)
+    pred = torch.sigmoid(pred_logits.float())   # float32：避免 AMP float16 加總溢位
+    target = target.float()
     intersection = (pred * target).sum(dim=(1, 2, 3))
     pred_size    = pred.sum(dim=(1, 2, 3))
     gt_size      = target.sum(dim=(1, 2, 3))
