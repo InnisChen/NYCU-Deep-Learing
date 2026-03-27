@@ -48,11 +48,11 @@ def train(args):
     os.makedirs(args.save_path, exist_ok=True)
     save_file = os.path.join(args.save_path, f"{args.model}_best.pth")
 
-    for epoch in range(1, args.epochs + 1):
+    for epoch in tqdm(range(1, args.epochs + 1), desc="Training"):
         # Train
         model.train()
         train_loss = 0.0
-        for images, masks in tqdm(train_loader, desc=f"Epoch {epoch}/{args.epochs} [train]", leave=False):
+        for images, masks in train_loader:
             images = images.to(device)
             masks  = masks.to(device)
 
@@ -60,7 +60,6 @@ def train(args):
             outputs = model(images)
             loss = criterion(outputs, masks)
             loss.backward()
-            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=5.0)
             optimizer.step()
             train_loss += loss.item()
 
@@ -70,7 +69,7 @@ def train(args):
         model.eval()
         val_dice = 0.0
         with torch.no_grad():
-            for images, masks in tqdm(valid_loader, desc=f"Epoch {epoch}/{args.epochs} [valid]", leave=False):
+            for images, masks in valid_loader:
                 images = images.to(device)
                 masks  = masks.to(device)
                 outputs = model(images)
