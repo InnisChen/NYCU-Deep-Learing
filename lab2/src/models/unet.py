@@ -1,7 +1,5 @@
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
-
 
 class DoubleConv(nn.Module):
     """Conv2d → ReLU → Conv2d → ReLU  (valid conv, no padding, no BN)"""
@@ -96,9 +94,8 @@ class UNet(nn.Module):
         x = self._crop_and_concat(s1, x)    # crop s1(252→72), cat → (B, 128, 72, 72)
         x = self.dec1(x)                    # (B,   64, 68,  68)
 
-        x = self.out_conv(x)                # (B,    1, 68,  68)
-        # return F.interpolate(x, size=(256, 256), mode='bilinear', align_corners=False)
-        return F.interpolate(x, size=(512, 512), mode='bilinear', align_corners=False)
+        x = self.out_conv(x)                # (B, 1, H_out, W_out)
+        return x
     
 
 

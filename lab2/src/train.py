@@ -76,6 +76,11 @@ def train(args):
             optimizer.zero_grad()
             with autocast('cuda'):
                 outputs = model(images)
+                # center-crop to match mask size (reflection pad 補的邊)
+                oh, ow = outputs.shape[-2], outputs.shape[-1]
+                mh, mw = masks.shape[-2], masks.shape[-1]
+                ch, cw = (oh - mh) // 2, (ow - mw) // 2
+                outputs = outputs[:, :, ch:ch+mh, cw:cw+mw]
                 loss = criterion(outputs, masks)
             scaler.scale(loss).backward()
             scaler.unscale_(optimizer)
@@ -95,6 +100,10 @@ def train(args):
                 masks  = masks.to(device)
                 with autocast('cuda'):
                     outputs = model(images)
+                oh, ow = outputs.shape[-2], outputs.shape[-1]
+                mh, mw = masks.shape[-2], masks.shape[-1]
+                ch, cw = (oh - mh) // 2, (ow - mw) // 2
+                outputs = outputs[:, :, ch:ch+mh, cw:cw+mw]
                 val_dice += dice_score(outputs, masks)
 
         val_dice /= len(valid_loader)

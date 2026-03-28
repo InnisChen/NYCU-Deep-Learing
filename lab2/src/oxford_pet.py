@@ -26,9 +26,12 @@ from PIL import Image
 import torch
 from torch.utils.data import Dataset, DataLoader
 import torchvision.transforms as transforms
+import torch.nn.functional as F
 import torchvision.transforms.functional as TF
 from torchvision.transforms import InterpolationMode
 import random
+
+REFLECT_PAD = 94   # 256+94*2=444 → UNet valid conv → 260 → crop 2px → 256
 
 class OxfordPetDataset(Dataset):
     def __init__(self, root, mode="train", transform=None, split_dir=None, splits_dir=None):
@@ -138,8 +141,7 @@ class OxfordPetDataset(Dataset):
     # ------------------------------------------------------------------ #
     def _apply_transforms(self, image, mask):
         """資料前處理 + Augmentation（只在 train 做增強）"""
-        #target_size = (256, 256)
-        target_size = (512, 512)
+        target_size = (256, 256)
 
         # 1. Resize
         image = TF.resize(image, target_size)
@@ -175,18 +177,24 @@ class OxfordPetDataset(Dataset):
             mean=[0.485, 0.456, 0.406],
             std =[0.229, 0.224, 0.225]
         )
+
+        # 7. Reflection padding（image only，mask 維持 256×256）
+        p = REFLECT_PAD
+        image = F.pad(image, (p, p, p, p), mode='reflect')
+
         return image, mask
 
     def _transform_image(self, image):
-        """test set 只做 resize + normalize"""
-        # image = TF.resize(image, (256, 256))
-        image = TF.resize(image, (512, 512))
+        """test set 只做 resize + normalize + reflection pad"""
+        image = TF.resize(image, (256, 256))
         image = TF.to_tensor(image)
         image = TF.normalize(
             image,
             mean=[0.485, 0.456, 0.406],
             std =[0.229, 0.224, 0.225]
         )
+        p = REFLECT_PAD
+        image = F.pad(image, (p, p, p, p), mode='reflect')
         return image
 
 
