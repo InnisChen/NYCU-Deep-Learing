@@ -42,7 +42,7 @@ def train(args):
     optimizer = torch.optim.Adam(model.parameters(), lr=args.learning_rate)
     scaler = GradScaler('cuda')
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer, mode="max", factor=0.5, patience=5
+        optimizer, mode="max", factor=0.5, patience=3
     )
 
     # ── Training loop ────────────────────────────────────────────────
