@@ -41,8 +41,8 @@ def train(args):
     criterion = bce_dice_loss   # BCE + Dice，避免模型 collapse 到全背景
     optimizer = torch.optim.Adam(model.parameters(), lr=args.learning_rate)
     scaler = GradScaler('cuda')
-    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer, mode="max", factor=0.5, patience=3
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+        optimizer, T_max=args.epochs, eta_min=1e-6
     )
 
     # ── Training loop ────────────────────────────────────────────────
@@ -107,7 +107,7 @@ def train(args):
                 val_dice += dice_score(outputs, masks)
 
         val_dice /= len(valid_loader)
-        scheduler.step(val_dice)
+        scheduler.step()
 
         print(f"Epoch {epoch:3d}/{args.epochs}  loss={train_loss:.4f}  val_dice={val_dice:.4f}")
 
