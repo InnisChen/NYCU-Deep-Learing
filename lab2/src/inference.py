@@ -65,6 +65,12 @@ def run_inference(args):
         for images, names, orig_sizes in tqdm(test_loader, desc="Inference"):
             images = images.to(device)
             outputs = torch.sigmoid(model(images))          # (B,1,H,W)
+            # center-crop to 256×256，與 train loop 一致（ResNet34UNet 輸出 444×444）
+            oh, ow = outputs.shape[-2], outputs.shape[-1]
+            th, tw = 256, 256
+            ch, cw = (oh - th) // 2, (ow - tw) // 2
+            if oh != th or ow != tw:
+                outputs = outputs[:, :, ch:ch+th, cw:cw+tw]
             preds = (outputs > 0.5).squeeze(1).cpu().numpy().astype(np.uint8)
 
             for name, pred, (orig_w, orig_h) in zip(names, preds, zip(*orig_sizes)):
