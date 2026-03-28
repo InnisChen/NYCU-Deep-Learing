@@ -47,10 +47,25 @@ def train(args):
 
     # ── Training loop ────────────────────────────────────────────────
     best_dice = 0.0
+    start_epoch = 1
     os.makedirs(args.save_path, exist_ok=True)
-    save_file = os.path.join(args.save_path, f"{args.model}_best.pth")
+    save_file   = os.path.join(args.save_path, f"{args.model}_best.pth")
+    ckpt_file   = os.path.join(args.save_path, f"{args.model}_checkpoint.pth")
 
-    for epoch in tqdm(range(1, args.epochs + 1), desc="Training"):
+    # Resume
+    if args.resume and os.path.exists(ckpt_file):
+        ckpt = torch.load(ckpt_file, map_location=device)
+        model.load_state_dict(ckpt["model"])
+        optimizer.load_state_dict(ckpt["optimizer"])
+        scaler.load_state_dict(ckpt["scaler"])
+        scheduler.load_state_dict(ckpt["scheduler"])
+        best_dice   = ckpt["best_dice"]
+        start_epoch = ckpt["epoch"] + 1
+        print(f"Resumed from epoch {ckpt['epoch']}  best_dice={best_dice:.4f}")
+    elif args.resume:
+        print(f"Checkpoint not found at {ckpt_file}, starting from scratch.")
+
+    for epoch in tqdm(range(start_epoch, args.epochs + 1), desc="Training"):
         # Train
         model.train()
         train_loss = 0.0
@@ -87,6 +102,16 @@ def train(args):
 
         print(f"Epoch {epoch:3d}/{args.epochs}  loss={train_loss:.4f}  val_dice={val_dice:.4f}")
 
+        # Save checkpoint (every epoch)
+        torch.save({
+            "epoch":     epoch,
+            "model":     model.state_dict(),
+            "optimizer": optimizer.state_dict(),
+            "scaler":    scaler.state_dict(),
+            "scheduler": scheduler.state_dict(),
+            "best_dice": best_dice,
+        }, ckpt_file)
+
         # Save best
         if val_dice > best_dice:
             best_dice = val_dice
@@ -108,5 +133,7 @@ if __name__ == "__main__":
     parser.add_argument("--epochs",        type=int,   default=50)
     parser.add_argument("--batch_size",    type=int,   default=8)
     parser.add_argument("--learning_rate", type=float, default=1e-4)
+    parser.add_argument("--resume",        action="store_true",
+                        help="從上次的 checkpoint 繼續訓練")
     args = parser.parse_args()
     train(args)
