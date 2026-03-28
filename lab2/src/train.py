@@ -41,8 +41,8 @@ def train(args):
     criterion = bce_dice_loss   # BCE + Dice，避免模型 collapse 到全背景
     optimizer = torch.optim.Adam(model.parameters(), lr=args.learning_rate)
     scaler = GradScaler('cuda')
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-        optimizer, T_max=args.epochs, eta_min=1e-6
+    scheduler = torch.optim.lr_scheduler.MultiStepLR(
+        optimizer, milestones=[50, 100], gamma=0.1
     )
 
     # ── Training loop ────────────────────────────────────────────────
@@ -111,7 +111,7 @@ def train(args):
 
         print(f"Epoch {epoch:3d}/{args.epochs}  loss={train_loss:.4f}  val_dice={val_dice:.4f}")
 
-        # Save checkpoint (every epoch)
+        # Save latest checkpoint (every epoch, overwrite) for resume
         torch.save({
             "epoch":     epoch,
             "model":     model.state_dict(),
@@ -120,6 +120,19 @@ def train(args):
             "scheduler": scheduler.state_dict(),
             "best_dice": best_dice,
         }, ckpt_file)
+
+        # Save periodic snapshot (every 20 epochs)
+        if epoch % 20 == 0:
+            ckpt_epoch_file = os.path.join(args.save_path, f"{args.model}_epoch{epoch}.pth")
+            torch.save({
+                "epoch":     epoch,
+                "model":     model.state_dict(),
+                "optimizer": optimizer.state_dict(),
+                "scaler":    scaler.state_dict(),
+                "scheduler": scheduler.state_dict(),
+                "best_dice": best_dice,
+            }, ckpt_epoch_file)
+            print(f"  → Snapshot saved (epoch={epoch})")
 
         # Save best
         if val_dice > best_dice:
