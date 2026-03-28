@@ -212,7 +212,7 @@ def load_dataset(root, mode, splits_dir=None):
     return dataset
 
 
-def get_loader(root, mode, batch_size=8, num_workers=2, shuffle=None, split_dir=None, splits_dir=None):
+def get_loader(root, mode, batch_size=8, num_workers=4, shuffle=None, split_dir=None, splits_dir=None):
     if shuffle is None:
         shuffle = (mode == "train")
 
