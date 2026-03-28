@@ -141,7 +141,7 @@ class OxfordPetDataset(Dataset):
     # ------------------------------------------------------------------ #
     def _apply_transforms(self, image, mask):
         """資料前處理 + Augmentation（只在 train 做增強）"""
-        target_size = (256, 256)
+        target_size = (384, 384)
 
         # 1. Resize
         image = TF.resize(image, target_size)
@@ -178,7 +178,7 @@ class OxfordPetDataset(Dataset):
             std =[0.229, 0.224, 0.225]
         )
 
-        # 7. Reflection padding（image only，mask 維持 256×256）
+        # 7. Reflection padding（image only，mask 維持 384×384）
         p = REFLECT_PAD
         image = F.pad(image, (p, p, p, p), mode='reflect')
 
@@ -186,7 +186,7 @@ class OxfordPetDataset(Dataset):
 
     def _transform_image(self, image):
         """test set 只做 resize + normalize + reflection pad"""
-        image = TF.resize(image, (256, 256))
+        image = TF.resize(image, (384, 384))
         image = TF.to_tensor(image)
         image = TF.normalize(
             image,
