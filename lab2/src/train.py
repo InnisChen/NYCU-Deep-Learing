@@ -42,7 +42,7 @@ def train(args):
     optimizer = torch.optim.Adam(model.parameters(), lr=args.learning_rate)
     scaler = GradScaler('cuda')
     scheduler = torch.optim.lr_scheduler.MultiStepLR(
-        optimizer, milestones=[50, 100], gamma=0.1
+        optimizer, milestones=[50, 100, 150], gamma=0.5
     )
 
     # ── Training loop ────────────────────────────────────────────────
@@ -152,8 +152,8 @@ if __name__ == "__main__":
     parser.add_argument("--split_dir",     type=str,   default=None,
                         help="Kaggle 競賽 split 資料夾（含 train.txt/val.txt/test_*.txt）")
     parser.add_argument("--save_path",     type=str,   default="saved_models")
-    parser.add_argument("--epochs",        type=int,   default=50)
-    parser.add_argument("--batch_size",    type=int,   default=8)
+    parser.add_argument("--epochs",        type=int,   default=200)
+    parser.add_argument("--batch_size",    type=int,   default=16)
     parser.add_argument("--learning_rate", type=float, default=1e-4)
     parser.add_argument("--resume",        action="store_true",
                         help="從上次的 checkpoint 繼續訓練")
