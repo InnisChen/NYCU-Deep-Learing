@@ -163,14 +163,22 @@ class OxfordPetDataset(Dataset):
             image = TF.rotate(image, angle)
             mask  = TF.rotate(mask,  angle)
 
-            # 5. Color Jitter（只對圖片做，mask 不動）
+            # 5. RandomResizedCrop（scale 模擬不同距離的目標）
+            i, j, h, w = transforms.RandomResizedCrop.get_params(
+                image, scale=(0.6, 1.0), ratio=(0.8, 1.2)
+            )
+            image = TF.resized_crop(image, i, j, h, w, target_size)
+            mask  = TF.resized_crop(mask,  i, j, h, w, target_size,
+                                    interpolation=InterpolationMode.NEAREST)
+
+            # 6. Color Jitter（只對圖片做，mask 不動）
             color_jitter = transforms.ColorJitter(
                 brightness=0.3, contrast=0.3,
                 saturation=0.3, hue=0.1
             )
             image = color_jitter(image)
 
-        # 6. ToTensor + Normalize（ImageNet mean/std）
+        # 7. ToTensor + Normalize（ImageNet mean/std）
         image = TF.to_tensor(image)   # [0,1], shape (3, H, W)
         image = TF.normalize(
             image,
@@ -178,7 +186,7 @@ class OxfordPetDataset(Dataset):
             std =[0.229, 0.224, 0.225]
         )
 
-        # 7. Reflection padding（image only，mask 維持 384×384）
+        # 8. Reflection padding（image only，mask 維持 384×384）
         p = REFLECT_PAD
         image = F.pad(image, (p, p, p, p), mode='reflect')
 
