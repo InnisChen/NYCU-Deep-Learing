@@ -59,18 +59,25 @@ def run_inference(args):
     )
     print(f"Test samples: {len(test_loader.dataset)}")
 
-    # ── Inference ────────────────────────────────────────────────────
+    def _forward(imgs):
+        """Forward pass + center-crop to 384×384"""
+        out = torch.sigmoid(model(imgs))
+        oh, ow = out.shape[-2], out.shape[-1]
+        th, tw = 384, 384
+        ch, cw = (oh - th) // 2, (ow - tw) // 2
+        if oh != th or ow != tw:
+            out = out[:, :, ch:ch+th, cw:cw+tw]
+        return out
+
+    # ── Inference (with TTA: original + hflip + vflip) ───────────────
     rows = []
     with torch.no_grad():
         for images, names, orig_sizes in tqdm(test_loader, desc="Inference"):
             images = images.to(device)
-            outputs = torch.sigmoid(model(images))          # (B,1,H,W)
-            # center-crop to 384×384，與 train loop 一致
-            oh, ow = outputs.shape[-2], outputs.shape[-1]
-            th, tw = 384, 384
-            ch, cw = (oh - th) // 2, (ow - tw) // 2
-            if oh != th or ow != tw:
-                outputs = outputs[:, :, ch:ch+th, cw:cw+tw]
+            outputs  = _forward(images)
+            outputs += _forward(torch.flip(images, [-1])).flip(-1)   # hflip
+            outputs += _forward(torch.flip(images, [-2])).flip(-2)   # vflip
+            outputs /= 3.0
             preds = (outputs > 0.5).squeeze(1).cpu().numpy().astype(np.uint8)
 
             for name, pred, (orig_w, orig_h) in zip(names, preds, zip(*orig_sizes)):
