@@ -116,27 +116,19 @@ def train(args):
 
         print(f"Epoch {epoch:3d}/{args.epochs}  loss={train_loss:.4f}  val_dice={val_dice:.4f}")
 
-        # Save latest checkpoint (every epoch, overwrite) for resume
-        torch.save({
-            "epoch":     epoch,
-            "model":     model.state_dict(),
-            "optimizer": optimizer.state_dict(),
-            "scaler":    scaler.state_dict(),
-            "scheduler": scheduler.state_dict(),
-            "best_dice": best_dice,
-        }, ckpt_file)
-
-        # Save periodic snapshot (every 20 epochs)
+        # Save periodic snapshot (every 20 epochs) + update checkpoint for resume
         if epoch % 20 == 0:
             ckpt_epoch_file = os.path.join(args.save_path, f"{args.model}_epoch{epoch}.pth")
-            torch.save({
+            ckpt_data = {
                 "epoch":     epoch,
                 "model":     model.state_dict(),
                 "optimizer": optimizer.state_dict(),
                 "scaler":    scaler.state_dict(),
                 "scheduler": scheduler.state_dict(),
                 "best_dice": best_dice,
-            }, ckpt_epoch_file)
+            }
+            torch.save(ckpt_data, ckpt_epoch_file)
+            torch.save(ckpt_data, ckpt_file)
             print(f"  → Snapshot saved (epoch={epoch})")
 
         # Save best
