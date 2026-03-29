@@ -116,8 +116,14 @@ def train(args):
 
         print(f"Epoch {epoch:3d}/{args.epochs}  loss={train_loss:.4f}  val_dice={val_dice:.4f}")
 
-        # Save periodic snapshot (every 20 epochs) + update checkpoint for resume
-        if epoch % 20 == 0:
+        # Save best model locally (fast, no Drive I/O)
+        if val_dice > best_dice:
+            best_dice = val_dice
+            torch.save(model.state_dict(), save_file)
+            print(f"  → Best model saved (dice={best_dice:.4f})")
+
+        # Save periodic snapshot (every 40 epochs) + backup to Drive
+        if epoch % 40 == 0:
             ckpt_epoch_file = os.path.join(args.save_path, f"{args.model}_epoch{epoch}.pth")
             ckpt_data = {
                 "epoch":     epoch,
@@ -131,11 +137,15 @@ def train(args):
             torch.save(ckpt_data, ckpt_file)
             print(f"  → Snapshot saved (epoch={epoch})")
 
-        # Save best
-        if val_dice > best_dice:
-            best_dice = val_dice
-            torch.save(model.state_dict(), save_file)
-            print(f"  → Best model saved (dice={best_dice:.4f})")
+            # Backup checkpoint + best model to Drive
+            if args.backup_path:
+                import shutil
+                os.makedirs(args.backup_path, exist_ok=True)
+                shutil.copy(ckpt_epoch_file, os.path.join(args.backup_path, f"{args.model}_epoch{epoch}.pth"))
+                shutil.copy(ckpt_file,       os.path.join(args.backup_path, f"{args.model}_checkpoint.pth"))
+                if os.path.exists(save_file):
+                    shutil.copy(save_file,   os.path.join(args.backup_path, f"{args.model}_best.pth"))
+                print(f"  → Backed up to Drive (epoch={epoch})")
 
     print(f"\nTraining done. Best Val Dice: {best_dice:.4f}")
     print(f"Model saved to: {save_file}")
@@ -149,6 +159,8 @@ if __name__ == "__main__":
     parser.add_argument("--split_dir",     type=str,   default=None,
                         help="Kaggle 競賽 split 資料夾（含 train.txt/val.txt/test_*.txt）")
     parser.add_argument("--save_path",     type=str,   default="saved_models")
+    parser.add_argument("--backup_path",   type=str,   default=None,
+                        help="每 40 epoch 備份 checkpoint + best model 到此路徑（Drive）")
     parser.add_argument("--epochs",        type=int,   default=200)
     parser.add_argument("--batch_size",    type=int,   default=16)
     parser.add_argument("--learning_rate", type=float, default=1e-4)
