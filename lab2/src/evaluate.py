@@ -15,11 +15,6 @@ SPLIT_DIR_MAP = {
 }
 
 
-def dice_score(pred: np.ndarray, target: np.ndarray) -> float:
-    intersection = (pred * target).sum()
-    return (2.0 * intersection) / (pred.sum() + target.sum() + 1e-8)
-
-
 def iou_score(pred: np.ndarray, target: np.ndarray) -> float:
     intersection = (pred * target).sum()
     union = pred.sum() + target.sum() - intersection
@@ -57,21 +52,33 @@ def run_evaluate(args):
     print(f"Val samples: {len(loader.dataset)}")
 
     # ── Evaluation ───────────────────────────────────────────────────
-    dice_list, iou_list = [], []
+    total_intersection = 0
+    total_pred = 0
+    total_gt   = 0
+    iou_list, n_samples = [], 0
 
     with torch.no_grad():
         for images, masks in tqdm(loader, desc="Evaluating"):
             images = images.to(device)
             outputs = torch.sigmoid(model(images))          # (B,1,H,W)
+            oh, ow = outputs.shape[-2], outputs.shape[-1]
+            mh, mw = masks.shape[-2], masks.shape[-1]
+            ch, cw = (oh - mh) // 2, (ow - mw) // 2
+            if oh != mh or ow != mw:
+                outputs = outputs[:, :, ch:ch+mh, cw:cw+mw]
             preds = (outputs > 0.5).squeeze(1).cpu().numpy().astype(np.uint8)
             targets = masks.squeeze(1).numpy().astype(np.uint8)
 
             for pred, target in zip(preds, targets):
-                dice_list.append(dice_score(pred, target))
+                total_intersection += (pred * target).sum()
+                total_pred += pred.sum()
+                total_gt   += target.sum()
                 iou_list.append(iou_score(pred, target))
+                n_samples += 1
 
-    print(f"Dice: {np.mean(dice_list):.4f}  |  IoU: {np.mean(iou_list):.4f}")
-    print(f"Samples: {len(dice_list)}")
+    global_dice = (2.0 * total_intersection) / (total_pred + total_gt + 1e-8)
+    print(f"Global Dice (Kaggle): {global_dice:.4f}  |  IoU: {np.mean(iou_list):.4f}")
+    print(f"Samples: {n_samples}")
 
 
 if __name__ == "__main__":

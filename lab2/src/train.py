@@ -7,7 +7,7 @@ from tqdm import tqdm
 from oxford_pet import get_loader
 from models.unet import UNet
 from models.resnet34_unet import ResNet34UNet
-from utils import dice_score, bce_dice_loss
+from utils import dice_components, bce_dice_loss
 
 
 SPLIT_DIR_MAP = {
@@ -42,7 +42,7 @@ def train(args):
     optimizer = torch.optim.Adam(model.parameters(), lr=args.learning_rate)
     scaler = GradScaler('cuda')
     scheduler = torch.optim.lr_scheduler.MultiStepLR(
-        optimizer, milestones=[50, 100, 150], gamma=0.5
+        optimizer, milestones=[50, 100, 150, 175], gamma=0.5
     )
 
     # ── Training loop ────────────────────────────────────────────────
@@ -93,7 +93,9 @@ def train(args):
 
         # Validate
         model.eval()
-        val_dice = 0.0
+        total_intersection = 0.0
+        total_pred = 0.0
+        total_gt   = 0.0
         with torch.no_grad():
             for images, masks in valid_loader:
                 images = images.to(device)
@@ -104,9 +106,12 @@ def train(args):
                 mh, mw = masks.shape[-2], masks.shape[-1]
                 ch, cw = (oh - mh) // 2, (ow - mw) // 2
                 outputs = outputs[:, :, ch:ch+mh, cw:cw+mw]
-                val_dice += dice_score(outputs, masks)
+                i, p, g = dice_components(outputs, masks)
+                total_intersection += i
+                total_pred += p
+                total_gt   += g
 
-        val_dice /= len(valid_loader)
+        val_dice = (2.0 * total_intersection) / (total_pred + total_gt + 1e-8)
         scheduler.step()
 
         print(f"Epoch {epoch:3d}/{args.epochs}  loss={train_loss:.4f}  val_dice={val_dice:.4f}")

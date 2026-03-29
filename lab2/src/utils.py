@@ -16,6 +16,19 @@ def dice_score(pred_logits, target, threshold=0.5):
     return dice.mean().item()
 
 
+def dice_components(pred_logits, target, threshold=0.5):
+    """
+    回傳 (intersection, pred_size, gt_size) 的 batch 總和，
+    供外部累積後計算 global Dice（與 Kaggle 評分方式一致）：
+        global_dice = 2 * total_intersection / (total_pred + total_gt)
+    """
+    pred = (torch.sigmoid(pred_logits) > threshold).float()
+    intersection = (pred * target).sum().item()
+    pred_size    = pred.sum().item()
+    gt_size      = target.sum().item()
+    return intersection, pred_size, gt_size
+
+
 def dice_loss(pred_logits, target):
     """
     Soft Dice loss（可微分，適合 training）
