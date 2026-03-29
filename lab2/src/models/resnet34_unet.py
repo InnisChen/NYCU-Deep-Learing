@@ -41,11 +41,54 @@ def _make_layer(in_channels, out_channels, num_blocks, stride=1):
 
 
 # ------------------------------------------------------------------ #
+#  CBAM                                                                #
+# ------------------------------------------------------------------ #
+
+class ChannelAttention(nn.Module):
+    def __init__(self, channels, reduction=16):
+        super().__init__()
+        mid = max(channels // reduction, 4)
+        self.avg_pool = nn.AdaptiveAvgPool2d(1)
+        self.max_pool = nn.AdaptiveMaxPool2d(1)
+        self.mlp = nn.Sequential(
+            nn.Conv2d(channels, mid, 1, bias=False),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(mid, channels, 1, bias=False),
+        )
+        self.sigmoid = nn.Sigmoid()
+
+    def forward(self, x):
+        return self.sigmoid(self.mlp(self.avg_pool(x)) + self.mlp(self.max_pool(x))) * x
+
+
+class SpatialAttention(nn.Module):
+    def __init__(self, kernel_size=7):
+        super().__init__()
+        self.conv = nn.Conv2d(2, 1, kernel_size, padding=kernel_size // 2, bias=False)
+        self.sigmoid = nn.Sigmoid()
+
+    def forward(self, x):
+        avg = x.mean(dim=1, keepdim=True)
+        mx  = x.max(dim=1, keepdim=True)[0]
+        return self.sigmoid(self.conv(torch.cat([avg, mx], dim=1))) * x
+
+
+class CBAM(nn.Module):
+    def __init__(self, channels, reduction=16, kernel_size=7):
+        super().__init__()
+        self.ca = ChannelAttention(channels, reduction)
+        self.sa = SpatialAttention(kernel_size)
+
+    def forward(self, x):
+        return self.sa(self.ca(x))
+
+
+# ------------------------------------------------------------------ #
 #  Decoder block                                                       #
 # ------------------------------------------------------------------ #
 
 class DecoderBlock(nn.Module):
-    """Upsample → concat(skip) → Conv → BN → ReLU → Conv → BN → ReLU"""
+    """Upsample → concat(skip) → Conv → BN → ReLU → Conv → BN → ReLU → CBAM"""
     def __init__(self, in_channels, skip_channels, out_channels):
         super().__init__()
         self.up = nn.ConvTranspose2d(in_channels, out_channels, kernel_size=2, stride=2)
@@ -57,13 +100,14 @@ class DecoderBlock(nn.Module):
             nn.BatchNorm2d(out_channels),
             nn.ReLU(inplace=True),
         )
+        self.cbam = CBAM(out_channels)
 
     def forward(self, x, skip):
         x = self.up(x)
         if x.shape != skip.shape:
             x = F.interpolate(x, size=skip.shape[2:], mode='bilinear', align_corners=False)
         x = torch.cat([skip, x], dim=1)
-        return self.conv(x)
+        return self.cbam(self.conv(x))
 
 
 # ------------------------------------------------------------------ #
