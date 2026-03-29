@@ -25,8 +25,8 @@ def train(args):
     print(f"Device: {device}")
 
     # ── DataLoader ───────────────────────────────────────────────────
-    train_loader = get_loader(args.data_path, mode="train", batch_size=args.batch_size, split_dir=args.split_dir)
-    valid_loader = get_loader(args.data_path, mode="valid", batch_size=args.batch_size, split_dir=args.split_dir)
+    train_loader = get_loader(args.data_path, mode="train", batch_size=args.batch_size, split_dir=args.split_dir, num_workers=args.num_workers)
+    valid_loader = get_loader(args.data_path, mode="valid", batch_size=args.batch_size, split_dir=args.split_dir, num_workers=args.num_workers)
     print(f"Train batches: {len(train_loader)}, Valid batches: {len(valid_loader)}")
 
     # ── Model ────────────────────────────────────────────────────────
@@ -160,6 +160,7 @@ if __name__ == "__main__":
     parser.add_argument("--epochs",        type=int,   default=200)
     parser.add_argument("--batch_size",    type=int,   default=16)
     parser.add_argument("--learning_rate", type=float, default=1e-4)
+    parser.add_argument("--num_workers",   type=int,   default=4)
     parser.add_argument("--resume",        action="store_true",
                         help="從上次的 checkpoint 繼續訓練")
     args = parser.parse_args()
