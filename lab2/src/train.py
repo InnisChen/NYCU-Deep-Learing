@@ -39,10 +39,10 @@ def train(args):
 
     # ── Loss & Optimizer ─────────────────────────────────────────────
     criterion = bce_dice_loss   # BCE + Dice，避免模型 collapse 到全背景
-    optimizer = torch.optim.Adam(model.parameters(), lr=args.learning_rate)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=args.learning_rate, weight_decay=1e-4)
     scaler = GradScaler('cuda')
-    scheduler = torch.optim.lr_scheduler.MultiStepLR(
-        optimizer, milestones=[50, 100, 150, 175], gamma=0.5
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+        optimizer, T_max=args.epochs, eta_min=1e-6
     )
 
     # ── Training loop ────────────────────────────────────────────────
