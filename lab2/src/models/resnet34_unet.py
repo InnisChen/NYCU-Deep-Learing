@@ -84,6 +84,25 @@ class CBAM(nn.Module):
 
 
 # ------------------------------------------------------------------ #
+#  Bridge                                                              #
+# ------------------------------------------------------------------ #
+
+class Bridge(nn.Module):
+    """Fuse layer3(256@16) + layer4(512@8) → 32@8"""
+    def __init__(self):
+        super().__init__()
+        self.conv = nn.Sequential(
+            nn.Conv2d(768, 32, 3, padding=1, bias=False),
+            nn.ReLU(inplace=True),
+            nn.BatchNorm2d(32),
+        )
+
+    def forward(self, f3, f4):
+        f3_down = F.interpolate(f3, size=f4.shape[2:], mode='bilinear', align_corners=False)
+        return self.conv(torch.cat([f3_down, f4], dim=1))
+
+
+# ------------------------------------------------------------------ #
 #  Decoder block                                                       #
 # ------------------------------------------------------------------ #
 
@@ -101,8 +120,8 @@ class DecoderBlock(nn.Module):
 
     def forward(self, x, skip):
         x = self.up(x)
-        if x.shape != skip.shape:
-            x = F.interpolate(x, size=skip.shape[2:], mode='bilinear', align_corners=False)
+        if x.shape[2:] != skip.shape[2:]:
+            skip = F.interpolate(skip, size=x.shape[2:], mode='bilinear', align_corners=False)
         x = torch.cat([skip, x], dim=1)
         return self.cbam(self.conv(x))
 
@@ -130,36 +149,41 @@ class ResNet34UNet(nn.Module):
         self.layer3 = _make_layer(128, 256, num_blocks=6, stride=2)   # 16×16
         self.layer4 = _make_layer(256, 512, num_blocks=3, stride=2)   #  8×8
 
-        # ── Decoder（UNet 風格）──────────────────────────────────────
-        # dec3: 512 up → concat skip3(256) → 256
-        self.dec3 = DecoderBlock(512,  skip_channels=256, out_channels=32)
-        # dec2: 32  up → concat skip2(128) → 32
-        self.dec2 = DecoderBlock(32,   skip_channels=128, out_channels=32)
-        # dec1: 32  up → concat skip1(64)  → 32
-        self.dec1 = DecoderBlock(32,   skip_channels=64,  out_channels=32)
-        # dec0: 32  up → concat skip0(64)  → 32
-        self.dec0 = DecoderBlock(32,   skip_channels=64,  out_channels=32)
+        # ── Bridge（融合 layer3 + layer4）────────────────────────────
+        self.bridge = Bridge()                                           # → 32@8
 
-        # 最後放大 × 2（128→256）再輸出
-        self.final_up  = nn.ConvTranspose2d(32, 32, kernel_size=2, stride=2)
+        # ── Decoder（論文架構）───────────────────────────────────────
+        # dec1: 32 up → concat layer4(512) → 32@16
+        self.dec1 = DecoderBlock(32, skip_channels=512, out_channels=32)
+        # dec2: 32 up → concat layer2(128) → 32@32
+        self.dec2 = DecoderBlock(32, skip_channels=128, out_channels=32)
+        # dec3: 32 up → concat layer1(64)  → 32@64
+        self.dec3 = DecoderBlock(32, skip_channels=64,  out_channels=32)
+
+        # 最後放大 × 4（64→256）再輸出
+        self.final_up1 = nn.ConvTranspose2d(32, 32, kernel_size=2, stride=2)  # 64→128
+        self.final_up2 = nn.ConvTranspose2d(32, 32, kernel_size=2, stride=2)  # 128→256
         self.out_conv  = nn.Conv2d(32, out_channels, kernel_size=1)
 
     def forward(self, x):
         # Encoder
-        s0 = self.init_conv(x)          # (B, 64,  128, 128)
-        x  = self.maxpool(s0)           # (B, 64,   64,  64)
+        x  = self.init_conv(x)          # (B, 64,  128, 128)
+        x  = self.maxpool(x)            # (B, 64,   64,  64)
         s1 = self.layer1(x)             # (B, 64,   64,  64)
         s2 = self.layer2(s1)            # (B, 128,  32,  32)
-        s3 = self.layer3(s2)            # (B, 256,  16,  16)
-        x  = self.layer4(s3)            # (B, 512,   8,   8)
+        f3 = self.layer3(s2)            # (B, 256,  16,  16)
+        f4 = self.layer4(f3)            # (B, 512,   8,   8)
+
+        # Bridge
+        x = self.bridge(f3, f4)        # (B, 32,    8,   8)
 
         # Decoder
-        x = self.dec3(x,  s3)          # (B, 256,  16,  16)
-        x = self.dec2(x,  s2)          # (B, 128,  32,  32)
-        x = self.dec1(x,  s1)          # (B, 64,   64,  64)
-        x = self.dec0(x,  s0)          # (B, 64,  128, 128)
+        x = self.dec1(x,  f4)          # (B, 32,   16,  16)
+        x = self.dec2(x,  s2)          # (B, 32,   32,  32)
+        x = self.dec3(x,  s1)          # (B, 32,   64,  64)
 
-        x = self.final_up(x)           # (B, 32,  256, 256)
+        x = self.final_up1(x)          # (B, 32,  128, 128)
+        x = self.final_up2(x)          # (B, 32,  256, 256)
         return self.out_conv(x)        # (B, 1,   256, 256)
 
 
