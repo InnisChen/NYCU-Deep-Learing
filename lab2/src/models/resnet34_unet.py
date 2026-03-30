@@ -88,17 +88,14 @@ class CBAM(nn.Module):
 # ------------------------------------------------------------------ #
 
 class DecoderBlock(nn.Module):
-    """Upsample → concat(skip) → Conv → BN → ReLU → Conv → BN → ReLU → CBAM"""
+    """Upsample → concat(skip) → Conv → ReLU → BN → CBAM"""
     def __init__(self, in_channels, skip_channels, out_channels):
         super().__init__()
         self.up = nn.ConvTranspose2d(in_channels, out_channels, kernel_size=2, stride=2)
         self.conv = nn.Sequential(
             nn.Conv2d(out_channels + skip_channels, out_channels, 3, padding=1, bias=False),
-            nn.BatchNorm2d(out_channels),
             nn.ReLU(inplace=True),
-            nn.Conv2d(out_channels, out_channels, 3, padding=1, bias=False),
             nn.BatchNorm2d(out_channels),
-            nn.ReLU(inplace=True),
         )
         self.cbam = CBAM(out_channels)
 
@@ -135,16 +132,16 @@ class ResNet34UNet(nn.Module):
 
         # ── Decoder（UNet 風格）──────────────────────────────────────
         # dec3: 512 up → concat skip3(256) → 256
-        self.dec3 = DecoderBlock(512,  skip_channels=256, out_channels=256)
-        # dec2: 256 up → concat skip2(128) → 128
-        self.dec2 = DecoderBlock(256,  skip_channels=128, out_channels=128)
-        # dec1: 128 up → concat skip1(64)  → 64
-        self.dec1 = DecoderBlock(128,  skip_channels=64,  out_channels=64)
-        # dec0: 64  up → concat skip0(64)  → 64
-        self.dec0 = DecoderBlock(64,   skip_channels=64,  out_channels=64)
+        self.dec3 = DecoderBlock(512,  skip_channels=256, out_channels=32)
+        # dec2: 32  up → concat skip2(128) → 32
+        self.dec2 = DecoderBlock(32,   skip_channels=128, out_channels=32)
+        # dec1: 32  up → concat skip1(64)  → 32
+        self.dec1 = DecoderBlock(32,   skip_channels=64,  out_channels=32)
+        # dec0: 32  up → concat skip0(64)  → 32
+        self.dec0 = DecoderBlock(32,   skip_channels=64,  out_channels=32)
 
         # 最後放大 × 2（128→256）再輸出
-        self.final_up  = nn.ConvTranspose2d(64, 32, kernel_size=2, stride=2)
+        self.final_up  = nn.ConvTranspose2d(32, 32, kernel_size=2, stride=2)
         self.out_conv  = nn.Conv2d(32, out_channels, kernel_size=1)
 
     def forward(self, x):
