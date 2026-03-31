@@ -31,7 +31,7 @@ import torchvision.transforms.functional as TF
 from torchvision.transforms import InterpolationMode
 import random
 
-REFLECT_PAD = 94   # 256+94*2=444 → UNet valid conv → 260 → crop 2px → 256
+REFLECT_PAD = 94   # 384+94*2=572 → UNet valid conv → 388 → center-crop 2px → 384
 
 class OxfordPetDataset(Dataset):
     def __init__(self, root, mode="train", transform=None, split_dir=None, splits_dir=None):
@@ -223,8 +223,8 @@ if __name__ == "__main__":
     
     train_loader = get_loader(root, mode="train", batch_size=4)
     images, masks = next(iter(train_loader))
-    print(f"[Train] image shape: {images.shape}")   # (4, 3, 256, 256)
-    print(f"[Train] mask  shape: {masks.shape}")    # (4, 1, 256, 256)
+    print(f"[Train] image shape: {images.shape}")   # (4, 3, 572, 572)
+    print(f"[Train] mask  shape: {masks.shape}")    # (4, 1, 384, 384)
     print(f"[Train] mask  unique values: {masks.unique()}")  # tensor([0., 1.])
 
     valid_loader = get_loader(root, mode="valid", batch_size=4)

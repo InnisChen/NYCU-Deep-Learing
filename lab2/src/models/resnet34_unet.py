@@ -88,7 +88,7 @@ class CBAM(nn.Module):
 # ------------------------------------------------------------------ #
 
 class Bridge(nn.Module):
-    """Fuse layer3(256@16) + layer4(512@8) → 32@8"""
+    """Fuse layer3(256@36) + layer4(512@18) → 32@18"""
     def __init__(self):
         super().__init__()
         self.conv = nn.Sequential(
@@ -135,63 +135,63 @@ class ResNet34UNet(nn.Module):
         super().__init__()
 
         # ── Encoder（ResNet34）──────────────────────────────────────
-        # 初始層:stride=2，輸出 128×128
+        # 初始層:stride=2，輸出 286×286
         self.init_conv = nn.Sequential(
             nn.Conv2d(in_channels, 64, kernel_size=7, stride=2, padding=3, bias=False),
             nn.BatchNorm2d(64),
             nn.ReLU(inplace=True),
         )
-        self.maxpool = nn.MaxPool2d(kernel_size=3, stride=2, padding=1)  # → 64×64
+        self.maxpool = nn.MaxPool2d(kernel_size=3, stride=2, padding=1)  # → 143×143
 
         # ResNet34 層數:[3, 4, 6, 3]
-        self.layer1 = _make_layer(64,  64,  num_blocks=3, stride=1)   # 64×64
-        self.layer2 = _make_layer(64,  128, num_blocks=4, stride=2)   # 32×32
-        self.layer3 = _make_layer(128, 256, num_blocks=6, stride=2)   # 16×16
-        self.layer4 = _make_layer(256, 512, num_blocks=3, stride=2)   #  8×8
+        self.layer1 = _make_layer(64,  64,  num_blocks=3, stride=1)   # 143×143
+        self.layer2 = _make_layer(64,  128, num_blocks=4, stride=2)   #  72×72
+        self.layer3 = _make_layer(128, 256, num_blocks=6, stride=2)   #  36×36
+        self.layer4 = _make_layer(256, 512, num_blocks=3, stride=2)   #  18×18
 
         # ── Bridge（融合 layer3 + layer4）────────────────────────────
-        self.bridge = Bridge()                                           # → 32@8
+        self.bridge = Bridge()                                           # → 32@18
 
         # ── Decoder（論文架構）───────────────────────────────────────
-        # dec1: 32 up → concat layer4(512) → 32@16
+        # dec1: 32 up → concat layer4(512) → 32@36
         self.dec1 = DecoderBlock(32, skip_channels=512, out_channels=32)
-        # dec2: 32 up → concat layer2(128) → 32@32
+        # dec2: 32 up → concat layer2(128) → 32@72
         self.dec2 = DecoderBlock(32, skip_channels=128, out_channels=32)
-        # dec3: 32 up → concat layer1(64)  → 32@64
+        # dec3: 32 up → concat layer1(64)  → 32@144
         self.dec3 = DecoderBlock(32, skip_channels=64,  out_channels=32)
 
-        # 最後放大 × 4（64→256）再輸出
-        self.final_up1 = nn.ConvTranspose2d(32, 32, kernel_size=2, stride=2)  # 64→128
-        self.final_up2 = nn.ConvTranspose2d(32, 32, kernel_size=2, stride=2)  # 128→256
+        # 最後放大 × 4（144→576）再輸出，train.py center-crop → 384×384
+        self.final_up1 = nn.ConvTranspose2d(32, 32, kernel_size=2, stride=2)  # 144→288
+        self.final_up2 = nn.ConvTranspose2d(32, 32, kernel_size=2, stride=2)  # 288→576
         self.out_conv  = nn.Conv2d(32, out_channels, kernel_size=1)
 
     def forward(self, x):
         # Encoder
-        x  = self.init_conv(x)          # (B, 64,  128, 128)
-        x  = self.maxpool(x)            # (B, 64,   64,  64)
-        s1 = self.layer1(x)             # (B, 64,   64,  64)
-        s2 = self.layer2(s1)            # (B, 128,  32,  32)
-        f3 = self.layer3(s2)            # (B, 256,  16,  16)
-        f4 = self.layer4(f3)            # (B, 512,   8,   8)
+        x  = self.init_conv(x)          # (B, 64,  286, 286)
+        x  = self.maxpool(x)            # (B, 64,  143, 143)
+        s1 = self.layer1(x)             # (B, 64,  143, 143)
+        s2 = self.layer2(s1)            # (B, 128,  72,  72)
+        f3 = self.layer3(s2)            # (B, 256,  36,  36)
+        f4 = self.layer4(f3)            # (B, 512,  18,  18)
 
         # Bridge
-        x = self.bridge(f3, f4)        # (B, 32,    8,   8)
+        x = self.bridge(f3, f4)        # (B, 32,   18,  18)
 
         # Decoder
-        x = self.dec1(x,  f4)          # (B, 32,   16,  16)
-        x = self.dec2(x,  s2)          # (B, 32,   32,  32)
-        x = self.dec3(x,  s1)          # (B, 32,   64,  64)
+        x = self.dec1(x,  f4)          # (B, 32,   36,  36)
+        x = self.dec2(x,  s2)          # (B, 32,   72,  72)
+        x = self.dec3(x,  s1)          # (B, 32,  144, 144)
 
-        x = self.final_up1(x)          # (B, 32,  128, 128)
-        x = self.final_up2(x)          # (B, 32,  256, 256)
-        return self.out_conv(x)        # (B, 1,   256, 256)
+        x = self.final_up1(x)          # (B, 32,  288, 288)
+        x = self.final_up2(x)          # (B, 32,  576, 576)
+        return self.out_conv(x)        # (B, 1,   576, 576) → center-crop → 384×384
 
 
 if __name__ == "__main__":
     model = ResNet34UNet()
-    x = torch.randn(2, 3, 256, 256)
+    x = torch.randn(2, 3, 572, 572)   # actual training input (384 + 94*2 reflection pad)
     out = model(x)
-    assert out.shape == (2, 1, 256, 256), f"shape error: {out.shape}"
-    print("ResNet34UNet OK:", out.shape)
+    assert out.shape == (2, 1, 576, 576), f"shape error: {out.shape}"
+    print("ResNet34UNet OK:", out.shape)   # (2, 1, 576, 576) → train.py center-crop → 384×384
     total_params = sum(p.numel() for p in model.parameters())
     print(f"Parameters: {total_params:,}")

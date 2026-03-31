@@ -19,15 +19,15 @@ class DoubleConv(nn.Module):
 class UNet(nn.Module):
     """
     UNet following arXiv:1505.04597 with valid convolutions.
-    Adapted for 256x256 input (paper uses 572x572).
+    Input: 572x572 (384 resized + 94px reflection padding on each side).
     Skip connections use center-crop to match decoder spatial size.
     Output channels = 1 for binary segmentation.
 
-    Spatial trace (256x256 input):
-        enc1: 252  pool→126  enc2: 122  pool→61  enc3: 57
-        pool→28    enc4: 24  pool→12   bottleneck: 8
-        up→16  dec4: 12  up→24  dec3: 20  up→40  dec2: 36  up→72  dec1: 68
-        output: (B, 1, 68, 68)
+    Spatial trace (572x572 input):
+        enc1: 568  pool→284  enc2: 280  pool→140  enc3: 136
+        pool→68    enc4: 64  pool→32   bottleneck: 28
+        up→56  dec4: 52  up→104  dec3: 100  up→200  dec2: 196  up→392  dec1: 388
+        output: (B, 1, 388, 388) → center-crop 2px → 384x384
     """
     def __init__(self, in_channels=3, out_channels=1):
         super().__init__()
@@ -69,32 +69,32 @@ class UNet(nn.Module):
 
     def forward(self, x):
         # Encoder
-        s1 = self.enc1(x)               # (B,  64, 252, 252)
-        s2 = self.enc2(self.pool(s1))   # (B, 128, 122, 122)
-        s3 = self.enc3(self.pool(s2))   # (B, 256,  57,  57)
-        s4 = self.enc4(self.pool(s3))   # (B, 512,  24,  24)
+        s1 = self.enc1(x)               # (B,  64, 568, 568)
+        s2 = self.enc2(self.pool(s1))   # (B, 128, 280, 280)
+        s3 = self.enc3(self.pool(s2))   # (B, 256, 136, 136)
+        s4 = self.enc4(self.pool(s3))   # (B, 512,  64,  64)
 
         # Bottleneck
-        x = self.bottleneck(self.pool(s4))  # (B, 1024,  8,   8)
+        x = self.bottleneck(self.pool(s4))  # (B, 1024,  28,  28)
 
         # Decoder
-        x = self.up4(x)                     # (B,  512, 16,  16)
-        x = self._crop_and_concat(s4, x)    # crop s4(24→16), cat → (B, 1024, 16, 16)
-        x = self.dec4(x)                    # (B,  512, 12,  12)
+        x = self.up4(x)                     # (B,  512,  56,  56)
+        x = self._crop_and_concat(s4, x)    # crop s4(64→56), cat → (B, 1024,  56,  56)
+        x = self.dec4(x)                    # (B,  512,  52,  52)
 
-        x = self.up3(x)                     # (B,  256, 24,  24)
-        x = self._crop_and_concat(s3, x)    # crop s3(57→24), cat → (B,  512, 24, 24)
-        x = self.dec3(x)                    # (B,  256, 20,  20)
+        x = self.up3(x)                     # (B,  256, 104, 104)
+        x = self._crop_and_concat(s3, x)    # crop s3(136→104), cat → (B, 512, 104, 104)
+        x = self.dec3(x)                    # (B,  256, 100, 100)
 
-        x = self.up2(x)                     # (B,  128, 40,  40)
-        x = self._crop_and_concat(s2, x)    # crop s2(122→40), cat → (B, 256, 40, 40)
-        x = self.dec2(x)                    # (B,  128, 36,  36)
+        x = self.up2(x)                     # (B,  128, 200, 200)
+        x = self._crop_and_concat(s2, x)    # crop s2(280→200), cat → (B, 256, 200, 200)
+        x = self.dec2(x)                    # (B,  128, 196, 196)
 
-        x = self.up1(x)                     # (B,   64, 72,  72)
-        x = self._crop_and_concat(s1, x)    # crop s1(252→72), cat → (B, 128, 72, 72)
-        x = self.dec1(x)                    # (B,   64, 68,  68)
+        x = self.up1(x)                     # (B,   64, 392, 392)
+        x = self._crop_and_concat(s1, x)    # crop s1(568→392), cat → (B, 128, 392, 392)
+        x = self.dec1(x)                    # (B,   64, 388, 388)
 
-        x = self.out_conv(x)                # (B, 1, H_out, W_out)
+        x = self.out_conv(x)                # (B, 1, 388, 388) → train.py center-crop → 384x384
         return x
     
 
