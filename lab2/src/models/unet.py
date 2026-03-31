@@ -19,11 +19,11 @@ class DoubleConv(nn.Module):
 class UNet(nn.Module):
     """
     UNet following arXiv:1505.04597 with valid convolutions.
-    Adapted for 256×256 input (paper uses 572×572).
+    Adapted for 256x256 input (paper uses 572x572).
     Skip connections use center-crop to match decoder spatial size.
     Output channels = 1 for binary segmentation.
 
-    Spatial trace (256×256 input):
+    Spatial trace (256x256 input):
         enc1: 252  pool→126  enc2: 122  pool→61  enc3: 57
         pool→28    enc4: 24  pool→12   bottleneck: 8
         up→16  dec4: 12  up→24  dec3: 20  up→40  dec2: 36  up→72  dec1: 68
@@ -55,11 +55,11 @@ class UNet(nn.Module):
         self.up1 = nn.ConvTranspose2d(128, 64, kernel_size=2, stride=2)
         self.dec1 = DoubleConv(128, 64)
 
-        # 1×1 output conv
+        # 1x1 output conv
         self.out_conv = nn.Conv2d(64, out_channels, kernel_size=1)
 
     def _crop_and_concat(self, encoder_feat, decoder_feat):
-        """Center-crop encoder_feat to match decoder_feat's H×W, then concat."""
+        """Center-crop encoder_feat to match decoder_feat's HxW, then concat."""
         _, _, eH, eW = encoder_feat.shape
         _, _, dH, dW = decoder_feat.shape
         crop_h = (eH - dH) // 2

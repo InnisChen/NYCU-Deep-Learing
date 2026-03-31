@@ -116,13 +116,13 @@ def train(args):
 
         print(f"Epoch {epoch:3d}/{args.epochs}  loss={train_loss:.4f}  val_dice={val_dice:.4f}")
 
-        # Save best model locally (fast, no Drive I/O)
+        # Save best model locally
         if val_dice > best_dice:
             best_dice = val_dice
             torch.save(model.state_dict(), save_file)
             print(f"  → Best model saved (dice={best_dice:.4f})")
 
-        # Save periodic snapshot (every 40 epochs) + backup to Drive
+        # Save periodic snapshot (every 40 epochs)
         if epoch % 40 == 0:
             ckpt_epoch_file = os.path.join(args.save_path, f"{args.model}_epoch{epoch}.pth")
             ckpt_data = {
@@ -157,13 +157,13 @@ if __name__ == "__main__":
                         choices=["unet", "resnet34_unet"])
     parser.add_argument("--data_path",     type=str,   default="dataset/oxford-iiit-pet")
     parser.add_argument("--split_dir",     type=str,   default=None,
-                        help="Kaggle 競賽 split 資料夾（含 train.txt/val.txt/test_*.txt）")
+                        help="Kaggle 競賽 split 資料夾(含 train.txt/val.txt/test_*.txt)")
     parser.add_argument("--save_path",     type=str,   default="saved_models")
     parser.add_argument("--backup_path",   type=str,   default=None,
-                        help="每 40 epoch 備份 checkpoint + best model 到此路徑（Drive）")
+                        help="每 40 epoch 備份 checkpoint + best model 到此路徑(Drive)")
     parser.add_argument("--epochs",        type=int,   default=200)
-    parser.add_argument("--batch_size",    type=int,   default=16)
-    parser.add_argument("--learning_rate", type=float, default=1e-4)
+    parser.add_argument("--batch_size",    type=int,   default=32)
+    parser.add_argument("--learning_rate", type=float, default=2e-4)
     parser.add_argument("--num_workers",   type=int,   default=4)
     parser.add_argument("--resume",        action="store_true",
                         help="從上次的 checkpoint 繼續訓練")

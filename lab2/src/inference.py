@@ -105,6 +105,6 @@ if __name__ == "__main__":
                         help="split 資料夾（含 test_*.txt）；預設依 model 自動選擇")
     parser.add_argument("--weight",     type=str, default="saved_models/unet_best.pth")
     parser.add_argument("--output",     type=str, default="submission.csv")
-    parser.add_argument("--batch_size", type=int, default=8)
+    parser.add_argument("--batch_size", type=int, default=32)
     args = parser.parse_args()
     run_inference(args)

@@ -38,9 +38,9 @@ class OxfordPetDataset(Dataset):
         """
         root      : dataset/oxford-iiit-pet/ 的路徑
         mode      : "train", "valid", "test"
-        split_dir : Kaggle 競賽資料夾路徑（含 train.txt / val.txt / test_*.txt）
+        split_dir : Kaggle 競賽資料夾路徑（含 train.txt / val.txt / test_*.txt)
                     若為 None，使用 Oxford 官方 split
-        splits_dir: 相對於 annotations/ 的子目錄（含 train.txt / val.txt / test_unet.txt）
+        splits_dir: 相對於 annotations/ 的子目錄（含 train.txt / val.txt / test_unet.txt)
                     若提供，優先使用此路徑
         """
         assert mode in ["train", "valid", "test"]
@@ -81,7 +81,7 @@ class OxfordPetDataset(Dataset):
                 assert candidates, f"No test*.txt found in {split_dir}"
                 list_file = os.path.join(split_dir, sorted(candidates)[0])
         else:
-            # fallback：Oxford 官方 split（trainval.txt 做 80/20 切分）
+            # fallback：Oxford 官方 split（trainval.txt 做 80/20 切分)
             if mode in ("train", "valid"):
                 trainval_file = os.path.join(root, "annotations", "trainval.txt")
                 all_names = []
@@ -123,7 +123,7 @@ class OxfordPetDataset(Dataset):
         mask_path = os.path.join(self.masks_dir, name + ".png")
         mask = Image.open(mask_path)   # 值為 1, 2, 3
 
-        # 套用資料增強（train）或只做 resize（valid）
+        # 套用資料增強（train)或只做 resize（valid)
         image, mask = self._apply_transforms(image, mask)
 
         # trimap → binary mask
@@ -140,7 +140,7 @@ class OxfordPetDataset(Dataset):
     #  內部 helper                                                         #
     # ------------------------------------------------------------------ #
     def _apply_transforms(self, image, mask):
-        """資料前處理 + Augmentation（只在 train 做增強）"""
+        """資料前處理 + Augmentation（只在 train 做增強)"""
         target_size = (384, 384)
 
         # 1. Resize
@@ -163,14 +163,14 @@ class OxfordPetDataset(Dataset):
             image = TF.rotate(image, angle)
             mask  = TF.rotate(mask,  angle)
 
-            # 5. Color Jitter（只對圖片做，mask 不動）
+            # 5. Color Jitter（只對圖片做，mask 不動)
             color_jitter = transforms.ColorJitter(
                 brightness=0.3, contrast=0.3,
                 saturation=0.3, hue=0.1
             )
             image = color_jitter(image)
 
-        # 6. ToTensor + Normalize（ImageNet mean/std）
+        # 6. ToTensor + Normalize（ImageNet mean/std)
         image = TF.to_tensor(image)   # [0,1], shape (3, H, W)
         image = TF.normalize(
             image,
@@ -178,7 +178,7 @@ class OxfordPetDataset(Dataset):
             std =[0.229, 0.224, 0.225]
         )
 
-        # 7. Reflection padding（image only，mask 維持 384×384）
+        # 7. Reflection padding（image only，mask 維持 384×384)
         p = REFLECT_PAD
         image = F.pad(image, (p, p, p, p), mode='reflect')
 
@@ -199,7 +199,7 @@ class OxfordPetDataset(Dataset):
 
 
 # ------------------------------------------------------------------ #
-#  DataLoader 工廠函式（給 train.py / evaluate.py / inference.py 呼叫）#
+#  DataLoader 工廠函式（給 train.py / evaluate.py / inference.py 呼叫)#
 # ------------------------------------------------------------------ #
 def load_dataset(root, mode, splits_dir=None):
     """

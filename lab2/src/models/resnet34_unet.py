@@ -8,7 +8,7 @@ import torch.nn.functional as F
 # ------------------------------------------------------------------ #
 
 class BasicBlock(nn.Module):
-    """ResNet34 基本 block：兩層 3×3 Conv + shortcut"""
+    """ResNet34 基本 block:兩層 3x3 Conv + shortcut"""
     def __init__(self, in_channels, out_channels, stride=1):
         super().__init__()
         self.conv1 = nn.Conv2d(in_channels, out_channels, 3, stride=stride, padding=1, bias=False)
@@ -135,7 +135,7 @@ class ResNet34UNet(nn.Module):
         super().__init__()
 
         # ── Encoder（ResNet34）──────────────────────────────────────
-        # 初始層：stride=2，輸出 128×128
+        # 初始層:stride=2，輸出 128×128
         self.init_conv = nn.Sequential(
             nn.Conv2d(in_channels, 64, kernel_size=7, stride=2, padding=3, bias=False),
             nn.BatchNorm2d(64),
@@ -143,7 +143,7 @@ class ResNet34UNet(nn.Module):
         )
         self.maxpool = nn.MaxPool2d(kernel_size=3, stride=2, padding=1)  # → 64×64
 
-        # ResNet34 層數：[3, 4, 6, 3]
+        # ResNet34 層數:[3, 4, 6, 3]
         self.layer1 = _make_layer(64,  64,  num_blocks=3, stride=1)   # 64×64
         self.layer2 = _make_layer(64,  128, num_blocks=4, stride=2)   # 32×32
         self.layer3 = _make_layer(128, 256, num_blocks=6, stride=2)   # 16×16

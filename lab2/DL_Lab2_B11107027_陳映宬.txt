@@ -1,0 +1,27 @@
+Implementation Highlights:
+Two encoder-decoder architectures implemented from scratch.
+UNet: valid convolutions (no padding), center-crop skip connections, transposed conv upsampling, 1x1 output conv.
+ResNet34+UNet: ResNet34 encoder, Bridge module for multi-scale feature fusion, UNet decoder with CBAM attention per block.
+Loss: BCE + Soft Dice (50/50) to prevent all-background collapse.
+AMP mixed precision + gradient clipping (max_norm=20).
+
+Data Preprocessing Strategy:
+Images resized to 384x384. Trimap to binary: value 1->foreground(1), values 2,3->background(0).
+Train augmentations: Random HFlip, VFlip, Rotation (+-30 deg), ColorJitter.
+ImageNet normalization applied.
+Reflection padding (+94px per side) to compensate UNet valid convolution shrinkage.
+
+Training Strategy:
+Optimizer: AdamW (lr=1e-4, weight_decay=1e-4).
+Scheduler: CosineAnnealingLR (T_max=200, eta_min=1e-6).
+Batch size: 32, Epochs: 200. Best model saved by validation Dice.
+
+Key Observations:
+Three LR schedulers were tested. ReduceLROnPlateau (no lower bound) decayed LR too aggressively, causing the model to stop learning. MultiStepLR (x0.5 at epochs 50/100/150) was more stable but suboptimal.
+CosineAnnealingLR (final choice): smooth decay to eta_min=1e-6 avoids premature collapse and yields the best validation Dice.
+
+Comparison: UNet vs ResNet34_UNet:
+UNet uses convolutions to shrink dimensions, requiring reflection padding. Simple and effective but limited in representational capacity.
+ResNet34+UNet: residual connections improve gradient flow; CBAM enhances decoder feature selection; Bridge fuses multi-scale features. Achieves higher Dice score due to stronger encoder representation.
+
+AI Disclosure: Model architectures were defined independently. Claude assisted in code generation. Code was then iteratively adjusted and retrained based on personal observations.
