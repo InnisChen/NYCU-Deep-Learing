@@ -81,20 +81,7 @@ class OxfordPetDataset(Dataset):
                 assert candidates, f"No test*.txt found in {split_dir}"
                 list_file = os.path.join(split_dir, sorted(candidates)[0])
         else:
-            # fallback：Oxford 官方 split（trainval.txt 做 80/20 切分)
-            if mode in ("train", "valid"):
-                trainval_file = os.path.join(root, "annotations", "trainval.txt")
-                all_names = []
-                with open(trainval_file, "r") as f:
-                    for line in f:
-                        parts = line.strip().split()
-                        if len(parts) >= 1 and not parts[0].startswith("#"):
-                            all_names.append(parts[0])
-                split_idx = int(len(all_names) * 0.8)
-                self.filenames = all_names[:split_idx] if mode == "train" else all_names[split_idx:]
-                return
-            else:
-                list_file = os.path.join(root, "annotations", "test.txt")
+            raise ValueError("split_dir must be provided")
 
         self.filenames = []
         with open(list_file, "r") as f:
@@ -129,7 +116,7 @@ class OxfordPetDataset(Dataset):
         # trimap → binary mask
         # 1 = foreground → 1
         # 2 = background → 0
-        # 3 = boundary   → 0  (依規定視為 background)
+        # 3 = boundary   → 0
         mask = np.array(mask, dtype=np.int64)
         binary_mask = (mask == 1).astype(np.float32)   # shape: (H, W)
         binary_mask = torch.tensor(binary_mask).unsqueeze(0)  # (1, H, W)
