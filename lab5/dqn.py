@@ -411,7 +411,7 @@ class DQNAgent:
                     "Epsilon": self.epsilon,
                 })
 
-            for _ in range(self.train_per_step * num_envs):
+            for _ in range(self.train_per_step):
                 self.train()
 
         vec_env.close()
