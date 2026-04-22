@@ -145,6 +145,7 @@ class DQNAgent:
         self.target_net.load_state_dict(self.q_net.state_dict())
         self.optimizer = optim.Adam(self.q_net.parameters(), lr=args.lr)
         self.scaler = torch.cuda.amp.GradScaler(enabled=torch.cuda.is_available())
+        
 
         self.memory = deque(maxlen=args.memory_size)
 
