@@ -163,6 +163,12 @@ class DQNAgent:
         self.save_dir = args.save_dir
         os.makedirs(self.save_dir, exist_ok=True)
 
+        self.task = args.task
+        self.student_id = args.student_id
+        self.checkpoint_freq = args.checkpoint_freq
+        self.task3_milestones = [600000, 1000000, 1500000, 2000000, 2500000]
+        self.saved_milestones = set()
+
     def select_action(self, state):
         if random.random() < self.epsilon:
             return random.randint(0, self.num_actions - 1)
@@ -171,8 +177,36 @@ class DQNAgent:
             q_values = self.q_net(state_tensor)
         return q_values.argmax().item()
 
-    def run(self, episodes=1000):
-        for ep in range(episodes):
+    def save_checkpoint(self, ep):
+        path = os.path.join(self.save_dir, "checkpoint.pt")
+        torch.save({
+            'q_net': self.q_net.state_dict(),
+            'target_net': self.target_net.state_dict(),
+            'optimizer': self.optimizer.state_dict(),
+            'epsilon': self.epsilon,
+            'env_count': self.env_count,
+            'train_count': self.train_count,
+            'best_reward': self.best_reward,
+            'episode': ep,
+            'saved_milestones': list(self.saved_milestones),
+        }, path)
+
+    def load_checkpoint(self, path):
+        ckpt = torch.load(path, map_location=self.device)
+        self.q_net.load_state_dict(ckpt['q_net'])
+        self.target_net.load_state_dict(ckpt['target_net'])
+        self.optimizer.load_state_dict(ckpt['optimizer'])
+        self.epsilon = ckpt['epsilon']
+        self.env_count = ckpt['env_count']
+        self.train_count = ckpt['train_count']
+        self.best_reward = ckpt['best_reward']
+        self.saved_milestones = set(ckpt.get('saved_milestones', []))
+        start_ep = ckpt['episode'] + 1
+        print(f"Resumed from checkpoint: ep={ckpt['episode']} env_count={self.env_count} epsilon={self.epsilon:.4f}")
+        return start_ep
+
+    def run(self, episodes=1000, start_ep=0):
+        for ep in range(start_ep, episodes):
             obs, _ = self.env.reset()
 
             state = self.preprocessor.reset(obs)
@@ -195,6 +229,20 @@ class DQNAgent:
                 total_reward += reward
                 self.env_count += 1
                 step_count += 1
+
+                # Task 3: save milestone snapshots
+                if self.task == 3:
+                    for milestone in self.task3_milestones:
+                        if self.env_count >= milestone and milestone not in self.saved_milestones:
+                            m_path = os.path.join(self.save_dir, f"LAB5_{self.student_id}_task3_{milestone}.pt")
+                            torch.save(self.q_net.state_dict(), m_path)
+                            self.saved_milestones.add(milestone)
+                            print(f"[Milestone] Saved {milestone} steps → {m_path}")
+                            wandb.log({"Milestone Steps": milestone, "Env Step Count": self.env_count})
+
+                # Periodic checkpoint for resume
+                if self.checkpoint_freq > 0 and self.env_count % self.checkpoint_freq == 0:
+                    self.save_checkpoint(ep)
 
                 if self.env_count % 1000 == 0:                 
                     print(f"[Collect] Ep: {ep} Step: {step_count} SC: {self.env_count} UC: {self.train_count} Eps: {self.epsilon:.4f}")
@@ -230,7 +278,10 @@ class DQNAgent:
                 eval_reward = self.evaluate()
                 if eval_reward > self.best_reward:
                     self.best_reward = eval_reward
-                    model_path = os.path.join(self.save_dir, "best_model.pt")
+                    if self.task == 3:
+                        model_path = os.path.join(self.save_dir, f"LAB5_{self.student_id}_task3_best.pt")
+                    else:
+                        model_path = os.path.join(self.save_dir, f"LAB5_{self.student_id}_task{self.task}.pt")
                     torch.save(self.q_net.state_dict(), model_path)
                     print(f"Saved new best model to {model_path} with reward {eval_reward}")
                 print(f"[TrueEval] Ep: {ep} Eval Reward: {eval_reward:.2f} SC: {self.env_count} UC: {self.train_count}")
@@ -304,9 +355,14 @@ class DQNAgent:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
+    parser.add_argument("--task", type=int, default=1, choices=[1, 2, 3])
+    parser.add_argument("--student-id", type=str, default="B11107027")
     parser.add_argument("--env-name", type=str, default="CartPole-v1")
+    parser.add_argument("--episodes", type=int, default=None, help="Override episode count")
     parser.add_argument("--save-dir", type=str, default="./results")
     parser.add_argument("--wandb-run-name", type=str, default="cartpole-run")
+    parser.add_argument("--resume", type=str, default=None, help="Path to checkpoint.pt to resume from")
+    parser.add_argument("--checkpoint-freq", type=int, default=50000, help="Save checkpoint every N env steps (0=disabled)")
     parser.add_argument("--batch-size", type=int, default=32)
     parser.add_argument("--memory-size", type=int, default=100000)
     parser.add_argument("--lr", type=float, default=0.0001)
@@ -320,7 +376,16 @@ if __name__ == "__main__":
     parser.add_argument("--train-per-step", type=int, default=1)
     args = parser.parse_args()
 
+    default_episodes = {1: 2000, 2: 10000, 3: 10000}
+    episodes = args.episodes if args.episodes is not None else default_episodes[args.task]
+
     project_name = "DLP-Lab5-DQN-Atari" if "ALE" in args.env_name else "DLP-Lab5-DQN-CartPole"
     wandb.init(project=project_name, name=args.wandb_run_name, save_code=True)
+
     agent = DQNAgent(env_name=args.env_name, args=args)
-    agent.run()
+
+    start_ep = 0
+    if args.resume:
+        start_ep = agent.load_checkpoint(args.resume)
+
+    agent.run(episodes=episodes, start_ep=start_ep)
