@@ -125,6 +125,7 @@ class PrioritizedReplayBuffer:
 
 class DQNAgent:
     def __init__(self, env_name="CartPole-v1", args=None):
+        self.env_name = env_name
         self.env = gym.make(env_name, render_mode="rgb_array")
         self.test_env = gym.make(env_name, render_mode="rgb_array")
         self.num_actions = self.env.action_space.n
@@ -309,6 +310,112 @@ class DQNAgent:
                     "Eval Reward": eval_reward
                 })
 
+    def run_vectorized(self, episodes=1000, start_ep=0, num_envs=4):
+        from gymnasium.vector import AsyncVectorEnv
+
+        def make_env():
+            def _init():
+                return gym.make(self.env_name)
+            return _init
+
+        vec_env = AsyncVectorEnv([make_env() for _ in range(num_envs)])
+        preprocessors = [AtariPreprocessor() for _ in range(num_envs)]
+
+        obs_batch, _ = vec_env.reset()
+        states = [preprocessors[i].reset(obs_batch[i]) for i in range(num_envs)]
+        ep_rewards = [0.0] * num_envs
+        ep_count = start_ep
+        last_eval_ep = (start_ep // 20) * 20
+
+        while ep_count < episodes:
+            actions = [self.select_action(states[i]) for i in range(num_envs)]
+            obs_batch, reward_batch, term_batch, trunc_batch, info_batch = vec_env.step(actions)
+
+            for i in range(num_envs):
+                done = bool(term_batch[i]) or bool(trunc_batch[i])
+
+                if done and 'final_observation' in info_batch and info_batch['final_observation'][i] is not None:
+                    next_obs = info_batch['final_observation'][i]
+                else:
+                    next_obs = obs_batch[i]
+                next_state = preprocessors[i].step(next_obs)
+
+                self.memory.append((states[i], actions[i], float(reward_batch[i]), next_state, done))
+                ep_rewards[i] += reward_batch[i]
+                self.env_count += 1
+
+                if self.task == 3:
+                    for milestone in self.task3_milestones:
+                        if self.env_count >= milestone and milestone not in self.saved_milestones:
+                            m_path = os.path.join(self.save_dir, f"LAB5_{self.student_id}_task3_{milestone}.pt")
+                            torch.save(self.q_net.state_dict(), m_path)
+                            self.saved_milestones.add(milestone)
+                            print(f"[Milestone] Saved {milestone} steps → {m_path}")
+                            wandb.log({"Milestone Steps": milestone, "Env Step Count": self.env_count})
+
+                if self.checkpoint_freq > 0 and self.env_count % self.checkpoint_freq == 0:
+                    self.save_checkpoint(ep_count)
+
+                if done:
+                    ep_count += 1
+                    total_reward = ep_rewards[i]
+                    ep_rewards[i] = 0.0
+
+                    print(f"[Eval] Ep: {ep_count} Total Reward: {total_reward} SC: {self.env_count} UC: {self.train_count} Eps: {self.epsilon:.4f}")
+                    wandb.log({
+                        "Episode": ep_count,
+                        "Total Reward": total_reward,
+                        "Env Step Count": self.env_count,
+                        "Update Count": self.train_count,
+                        "Epsilon": self.epsilon,
+                    })
+
+                    if ep_count % 100 == 0:
+                        model_path = os.path.join(self.save_dir, f"model_ep{ep_count}.pt")
+                        torch.save(self.q_net.state_dict(), model_path)
+                        print(f"Saved model checkpoint to {model_path}")
+
+                    if ep_count % 20 == 0 and ep_count != last_eval_ep:
+                        last_eval_ep = ep_count
+                        eval_reward = self.evaluate()
+                        if eval_reward > self.best_reward:
+                            self.best_reward = eval_reward
+                            if self.task == 3:
+                                model_path = os.path.join(self.save_dir, f"LAB5_{self.student_id}_task3_best.pt")
+                            else:
+                                model_path = os.path.join(self.save_dir, f"LAB5_{self.student_id}_task{self.task}.pt")
+                            torch.save(self.q_net.state_dict(), model_path)
+                            print(f"Saved new best model to {model_path} with reward {eval_reward}")
+                            drive_ckpt_dir = os.environ.get("DRIVE_CKPT_DIR", "")
+                            if drive_ckpt_dir and os.path.isdir(drive_ckpt_dir):
+                                import shutil
+                                drive_best = os.path.join(os.path.dirname(drive_ckpt_dir), os.path.basename(model_path))
+                                shutil.copy(model_path, drive_best)
+                                print(f"[Drive] Best model backed up → {drive_best}")
+                        print(f"[TrueEval] Ep: {ep_count} Eval Reward: {eval_reward:.2f} SC: {self.env_count} UC: {self.train_count}")
+                        wandb.log({
+                            "Env Step Count": self.env_count,
+                            "Update Count": self.train_count,
+                            "Eval Reward": eval_reward,
+                        })
+
+                    states[i] = preprocessors[i].reset(obs_batch[i])
+                else:
+                    states[i] = next_state
+
+            if self.env_count % 1000 < num_envs:
+                print(f"[Collect] SC: {self.env_count} UC: {self.train_count} Eps: {self.epsilon:.4f}")
+                wandb.log({
+                    "Env Step Count": self.env_count,
+                    "Update Count": self.train_count,
+                    "Epsilon": self.epsilon,
+                })
+
+            for _ in range(self.train_per_step * num_envs):
+                self.train()
+
+        vec_env.close()
+
     def evaluate(self):
         obs, _ = self.test_env.reset()
         state = self.preprocessor.reset(obs)
@@ -396,6 +503,7 @@ if __name__ == "__main__":
     parser.add_argument("--replay-start-size", type=int, default=50000)
     parser.add_argument("--max-episode-steps", type=int, default=10000)
     parser.add_argument("--train-per-step", type=int, default=1)
+    parser.add_argument("--num-envs", type=int, default=1, help="Number of parallel envs (>1 uses run_vectorized)")
     args = parser.parse_args()
 
     default_episodes = {1: 2000, 2: 10000, 3: 10000}
@@ -410,4 +518,7 @@ if __name__ == "__main__":
     if args.resume:
         start_ep = agent.load_checkpoint(args.resume)
 
-    agent.run(episodes=episodes, start_ep=start_ep)
+    if args.num_envs > 1:
+        agent.run_vectorized(episodes=episodes, start_ep=start_ep, num_envs=args.num_envs)
+    else:
+        agent.run(episodes=episodes, start_ep=start_ep)
