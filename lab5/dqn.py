@@ -342,6 +342,7 @@ class DQNAgent:
         loss = F.mse_loss(q_values, target)
         self.optimizer.zero_grad()
         loss.backward()
+        torch.nn.utils.clip_grad_norm_(self.q_net.parameters(), max_norm=10.0)
         self.optimizer.step()
         ########## END OF YOUR CODE ##########
 
