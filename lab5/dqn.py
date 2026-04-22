@@ -144,6 +144,7 @@ class DQNAgent:
         self.q_net.apply(init_weights)
         self.target_net.load_state_dict(self.q_net.state_dict())
         self.optimizer = optim.Adam(self.q_net.parameters(), lr=args.lr)
+        self.scaler = torch.cuda.amp.GradScaler(enabled=torch.cuda.is_available())
 
         self.memory = deque(maxlen=args.memory_size)
 
@@ -183,6 +184,7 @@ class DQNAgent:
             'q_net': self.q_net.state_dict(),
             'target_net': self.target_net.state_dict(),
             'optimizer': self.optimizer.state_dict(),
+            'scaler': self.scaler.state_dict(),
             'epsilon': self.epsilon,
             'env_count': self.env_count,
             'train_count': self.train_count,
@@ -190,6 +192,13 @@ class DQNAgent:
             'episode': ep,
             'saved_milestones': list(self.saved_milestones),
         }, path)
+        # Sync to Google Drive if mounted
+        drive_ckpt_dir = os.environ.get("DRIVE_CKPT_DIR", "")
+        if drive_ckpt_dir and os.path.isdir(drive_ckpt_dir):
+            import shutil
+            backup = os.path.join(drive_ckpt_dir, f"task{self.task}_checkpoint.pt")
+            shutil.copy(path, backup)
+            print(f"[Drive] Checkpoint backed up → {backup}")
 
     def load_checkpoint(self, path):
         ckpt = torch.load(path, map_location=self.device)
@@ -201,6 +210,8 @@ class DQNAgent:
         self.train_count = ckpt['train_count']
         self.best_reward = ckpt['best_reward']
         self.saved_milestones = set(ckpt.get('saved_milestones', []))
+        if 'scaler' in ckpt:
+            self.scaler.load_state_dict(ckpt['scaler'])
         start_ep = ckpt['episode'] + 1
         print(f"Resumed from checkpoint: ep={ckpt['episode']} env_count={self.env_count} epsilon={self.epsilon:.4f}")
         return start_ep
@@ -284,6 +295,12 @@ class DQNAgent:
                         model_path = os.path.join(self.save_dir, f"LAB5_{self.student_id}_task{self.task}.pt")
                     torch.save(self.q_net.state_dict(), model_path)
                     print(f"Saved new best model to {model_path} with reward {eval_reward}")
+                    drive_ckpt_dir = os.environ.get("DRIVE_CKPT_DIR", "")
+                    if drive_ckpt_dir and os.path.isdir(drive_ckpt_dir):
+                        import shutil
+                        drive_best = os.path.join(os.path.dirname(drive_ckpt_dir), os.path.basename(model_path))
+                        shutil.copy(model_path, drive_best)
+                        print(f"[Drive] Best model backed up → {drive_best}")
                 print(f"[TrueEval] Ep: {ep} Eval Reward: {eval_reward:.2f} SC: {self.env_count} UC: {self.train_count}")
                 wandb.log({
                     "Env Step Count": self.env_count,
@@ -332,18 +349,21 @@ class DQNAgent:
         actions = torch.tensor(actions, dtype=torch.int64).to(self.device)
         rewards = torch.tensor(rewards, dtype=torch.float32).to(self.device)
         dones = torch.tensor(dones, dtype=torch.float32).to(self.device)
-        q_values = self.q_net(states).gather(1, actions.unsqueeze(1)).squeeze(1)
 
         ########## YOUR CODE HERE (~10 lines) ##########
         # Implement the loss function of DQN and the gradient updates
-        with torch.no_grad():
-            next_q = self.target_net(next_states).max(1)[0]
-            target = rewards + self.gamma * next_q * (1 - dones)
-        loss = F.mse_loss(q_values, target)
+        with torch.cuda.amp.autocast(enabled=torch.cuda.is_available()):
+            q_values = self.q_net(states).gather(1, actions.unsqueeze(1)).squeeze(1)
+            with torch.no_grad():
+                next_q = self.target_net(next_states).max(1)[0]
+                target = rewards + self.gamma * next_q * (1 - dones)
+            loss = F.mse_loss(q_values, target)
         self.optimizer.zero_grad()
-        loss.backward()
+        self.scaler.scale(loss).backward()
+        self.scaler.unscale_(self.optimizer)
         torch.nn.utils.clip_grad_norm_(self.q_net.parameters(), max_norm=10.0)
-        self.optimizer.step()
+        self.scaler.step(self.optimizer)
+        self.scaler.update()
         ########## END OF YOUR CODE ##########
 
         if self.train_count % self.target_update_frequency == 0:
