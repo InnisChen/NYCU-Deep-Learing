@@ -73,6 +73,7 @@ def evaluate(args):
 
     os.makedirs(args.output_dir, exist_ok=True)
 
+    rewards = []  # ADDED: collect rewards for summary
     for ep in range(args.episodes):
         obs, _ = env.reset(seed=args.seed + ep)
         state = preprocessor.reset(obs)
@@ -95,11 +96,16 @@ def evaluate(args):
             state = preprocessor.step(next_obs)
             frame_idx += 1
 
+        rewards.append(total_reward)  # ADDED
         out_path = os.path.join(args.output_dir, f"eval_ep{ep}.mp4")
         with imageio.get_writer(out_path, fps=30) as video:
             for f in frames:
                 video.append_data(f)
-        print(f"Saved episode {ep} with total reward {total_reward} → {out_path}")
+        print(f"Saved episode {ep} (seed={args.seed + ep}) with total reward {total_reward} → {out_path}")
+
+    # ADDED: print summary statistics
+    print(f"\nAverage ({args.episodes} episodes): {np.mean(rewards):.2f}  |  Min: {np.min(rewards):.1f}  Max: {np.max(rewards):.1f}")
+    # END ADDED
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
