@@ -773,7 +773,14 @@ if __name__ == "__main__":
     parser.add_argument("--per-alpha", type=float, default=0.6)
     parser.add_argument("--per-beta", type=float, default=0.4)
     parser.add_argument("--per-beta-anneal-steps", type=int, default=1000000)
+    parser.add_argument("--seed", type=int, default=42, help="Global random seed")
     args = parser.parse_args()
+
+    import random
+    random.seed(args.seed)
+    np.random.seed(args.seed)
+    torch.manual_seed(args.seed)
+    torch.cuda.manual_seed(args.seed)
 
     default_episodes = {1: 2000, 2: 10000, 3: 10000}
     episodes = args.episodes if args.episodes is not None else default_episodes[args.task]
