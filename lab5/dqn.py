@@ -614,7 +614,7 @@ class DQNAgent:
             # Add additional wandb logs for debugging if needed
 
             ########## END OF YOUR CODE ##########
-            if ep % 100 == 0:
+            if self.task != 3 and ep % 100 == 0:
                 model_path = os.path.join(self.save_dir, f"model_ep{ep}.pt")
                 torch.save(self.q_net.state_dict(), model_path)
                 print(f"Saved model checkpoint to {model_path}")
