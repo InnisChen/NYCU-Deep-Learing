@@ -437,7 +437,7 @@ class DQNAgent:
         self.q_net.apply(init_weights)
         self.target_net.load_state_dict(self.q_net.state_dict())
         self.optimizer = optim.Adam(self.q_net.parameters(), lr=args.lr)
-        self.scaler = torch.cuda.amp.GradScaler(enabled=torch.cuda.is_available())
+        self.scaler = torch.amp.GradScaler('cuda', enabled=torch.cuda.is_available())
 
         self.batch_size = args.batch_size
         self.gamma = gamma
@@ -579,6 +579,12 @@ class DQNAgent:
                             self.saved_milestones.add(milestone)
                             print(f"[Milestone] Saved {milestone} steps → {m_path}")
                             wandb.log({"Milestone Steps": milestone, "Env Step Count": self.env_count})
+                            drive_ckpt_dir = os.environ.get("DRIVE_CKPT_DIR", "")
+                            if drive_ckpt_dir and os.path.isdir(drive_ckpt_dir):
+                                import shutil
+                                drive_milestone = os.path.join(os.path.dirname(drive_ckpt_dir), os.path.basename(m_path))
+                                shutil.copy(m_path, drive_milestone)
+                                print(f"[Drive] Milestone backed up → {drive_milestone}")
 
                 if self.checkpoint_freq > 0 and self.env_count % self.checkpoint_freq == 0:
                     self.save_checkpoint(ep)
@@ -612,9 +618,21 @@ class DQNAgent:
                 model_path = os.path.join(self.save_dir, f"model_ep{ep}.pt")
                 torch.save(self.q_net.state_dict(), model_path)
                 print(f"Saved model checkpoint to {model_path}")
+                # Sync snapshot to Drive so it survives a Colab runtime restart
+                drive_ckpt_dir = os.environ.get("DRIVE_CKPT_DIR", "")
+                if drive_ckpt_dir and os.path.isdir(drive_ckpt_dir):
+                    import shutil
+                    snap_dir = os.path.join(os.path.dirname(drive_ckpt_dir), f"task{self.task}_snapshots")
+                    os.makedirs(snap_dir, exist_ok=True)
+                    shutil.copy(model_path, os.path.join(snap_dir, f"model_ep{ep}.pt"))
+                    print(f"[Drive] Snapshot synced → {snap_dir}/model_ep{ep}.pt")
 
-            if ep % 20 == 0:
-                eval_reward = self.evaluate()
+            # Atari eval: every 50 episodes, 3-episode average (less noisy for best-model selection)
+            # CartPole eval: every 20 episodes, single episode (fast, stable)
+            eval_every = 50 if self.is_atari else 20
+            eval_n = 3 if self.is_atari else 1
+            if ep % eval_every == 0:
+                eval_reward = self.evaluate(n_episodes=eval_n)
                 if eval_reward > self.best_reward:
                     self.best_reward = eval_reward
                     if self.task == 3:
@@ -636,22 +654,25 @@ class DQNAgent:
                     "Eval Reward": eval_reward
                 })
 
-    def evaluate(self):
-        obs, _ = self.test_env.reset()
-        state = self._reset_state(obs)
-        done = False
-        total_reward = 0
+    def evaluate(self, n_episodes=1):
+        """Return average reward over n_episodes evaluation rollouts."""
+        rewards = []
+        for _ in range(n_episodes):
+            obs, _ = self.test_env.reset()
+            state = self._reset_state(obs)
+            done = False
+            total_reward = 0
 
-        while not done:
-            state_tensor = torch.from_numpy(np.asarray(state)).float().unsqueeze(0).to(self.device)
-            with torch.no_grad():
-                action = self.q_net(state_tensor).argmax().item()
-            next_obs, reward, terminated, truncated, _ = self.test_env.step(action)
-            done = terminated or truncated
-            total_reward += reward
-            state = self._step_state(next_obs)
-
-        return total_reward
+            while not done:
+                state_tensor = torch.from_numpy(np.asarray(state)).float().unsqueeze(0).to(self.device)
+                with torch.no_grad():
+                    action = self.q_net(state_tensor).argmax().item()
+                next_obs, reward, terminated, truncated, _ = self.test_env.step(action)
+                done = terminated or truncated
+                total_reward += reward
+                state = self._step_state(next_obs)
+            rewards.append(total_reward)
+        return float(np.mean(rewards))
 
 
     def train(self):
@@ -688,7 +709,7 @@ class DQNAgent:
 
         ########## YOUR CODE HERE (~10 lines) ##########
         # Implement the loss function of DQN and the gradient updates
-        with torch.cuda.amp.autocast(enabled=torch.cuda.is_available()):
+        with torch.amp.autocast('cuda', enabled=torch.cuda.is_available()):
             q_values = self.q_net(states).gather(1, actions.unsqueeze(1)).squeeze(1)
             with torch.no_grad():
                 if self.use_double:
@@ -759,6 +780,8 @@ if __name__ == "__main__":
 
     project_name = "DLP-Lab5-DQN-Atari" if "ALE" in args.env_name else "DLP-Lab5-DQN-CartPole"
     wandb.init(project=project_name, name=args.wandb_run_name, save_code=True)
+    wandb.define_metric("Env Step Count")
+    wandb.define_metric("*", step_metric="Env Step Count")
 
     agent = DQNAgent(env_name=args.env_name, args=args)
 
