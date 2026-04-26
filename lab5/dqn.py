@@ -469,6 +469,7 @@ class DQNAgent:
         self.noop_max = int(getattr(args, 'noop_max', 0))
         self.noop_step_count = 0
         self._seeded_single = False
+        self.last_train_stats = {}
 
     def _reset_state(self, obs):
         if self.is_atari:
@@ -614,27 +615,31 @@ class DQNAgent:
 
                 if self.env_count % 1000 == 0:
                     print(f"[Collect] Ep: {ep} Step: {step_count} SC: {self.env_count} UC: {self.train_count} Eps: {self.epsilon:.4f}")
-                    wandb.log({
+                    log_data = {
                         "Episode": ep,
                         "Step Count": step_count,
                         "Env Step Count": self.env_count,
                         "Update Count": self.train_count,
                         "Epsilon": self.epsilon,
                         "Noop Step Count": self.noop_step_count
-                    })
+                    }
+                    log_data.update(self.last_train_stats)
+                    wandb.log(log_data)
                     ########## YOUR CODE HERE  ##########
                     # Add additional wandb logs for debugging if needed
 
                     ########## END OF YOUR CODE ##########
             print(f"[Eval] Ep: {ep} Total Reward: {total_reward} SC: {self.env_count} UC: {self.train_count} Eps: {self.epsilon:.4f}")
-            wandb.log({
+            log_data = {
                 "Episode": ep,
                 "Total Reward": total_reward,
                 "Env Step Count": self.env_count,
                 "Update Count": self.train_count,
                 "Epsilon": self.epsilon,
                 "Noop Step Count": self.noop_step_count
-            })
+            }
+            log_data.update(self.last_train_stats)
+            wandb.log(log_data)
             ########## YOUR CODE HERE  ##########
             # Add additional wandb logs for debugging if needed
 
@@ -752,7 +757,7 @@ class DQNAgent:
         self.optimizer.zero_grad()
         self.scaler.scale(loss).backward()
         self.scaler.unscale_(self.optimizer)
-        torch.nn.utils.clip_grad_norm_(self.q_net.parameters(), max_norm=10.0)
+        grad_norm = torch.nn.utils.clip_grad_norm_(self.q_net.parameters(), max_norm=10.0)
         self.scaler.step(self.optimizer)
         self.scaler.update()
         ########## END OF YOUR CODE ##########
@@ -764,9 +769,23 @@ class DQNAgent:
         if self.train_count % self.target_update_frequency == 0:
             self.target_net.load_state_dict(self.q_net.state_dict())
 
-        # NOTE: Enable this part if "loss" is defined
-        #if self.train_count % 1000 == 0:
-        #    print(f"[Train #{self.train_count}] Loss: {loss.item():.4f} Q mean: {q_values.mean().item():.3f} std: {q_values.std().item():.3f}")
+        if self.train_count % 100 == 0 or not self.last_train_stats:
+            per = self._per_buffer()
+            self.last_train_stats = {
+                "Train/Loss": float(loss.detach().cpu().item()),
+                "Train/Q Mean": float(q_values.detach().mean().cpu().item()),
+                "Train/Q Max": float(q_values.detach().max().cpu().item()),
+                "Train/Target Mean": float(target.detach().mean().cpu().item()),
+                "Train/TD Error Mean": float(td_errors.detach().abs().mean().cpu().item()),
+                "Train/TD Error Max": float(td_errors.detach().abs().max().cpu().item()),
+                "Train/Grad Norm": float(grad_norm.detach().cpu().item() if torch.is_tensor(grad_norm) else grad_norm),
+                "Train/Replay Size": len(self.memory),
+            }
+            if per is not None:
+                self.last_train_stats.update({
+                    "Train/PER Beta": float(per.beta),
+                    "Train/PER Max Priority": float(per.max_priority),
+                })
 
 
 if __name__ == "__main__":
