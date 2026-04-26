@@ -1,62 +1,18 @@
-import torch
-import torch.nn as nn
-import torch.optim as optim
-import numpy as np
-import random
-import gymnasium as gym
-import cv2
-import imageio
-import ale_py
-import os
-from collections import deque
 import argparse
+import os
+import random
 
-class DQN(nn.Module):
-    def __init__(self, input_channels, num_actions):
-        super(DQN, self).__init__()
-        self.network = nn.Sequential(
-            nn.Conv2d(input_channels, 32, kernel_size=8, stride=4),
-            nn.ReLU(),
-            nn.Conv2d(32, 64, kernel_size=4, stride=2),
-            nn.ReLU(),
-            nn.Conv2d(64, 64, kernel_size=3, stride=1),
-            nn.ReLU(),
-            nn.Flatten(),
-            nn.Linear(64 * 7 * 7, 512),
-            nn.ReLU(),
-            nn.Linear(512, num_actions)
-        )
+import ale_py
+import gymnasium as gym
+import imageio
+import numpy as np
+import torch
 
-    def forward(self, x):
-        return self.network(x / 255.0)
-class AtariPreprocessor:
-    def __init__(self, frame_stack=4):
-        self.frame_stack = frame_stack
-        self.frames = deque(maxlen=frame_stack)
-        self.last_frame = None
+from dqn import AtariPreprocessor, DQN, _migrate_dqn_state_dict
 
-    def preprocess(self, obs):
-        if len(obs.shape) == 3 and obs.shape[2] == 3:
-            gray = cv2.cvtColor(obs, cv2.COLOR_RGB2GRAY)
-        else:
-            gray = obs
-        resized = cv2.resize(gray, (84, 84), interpolation=cv2.INTER_AREA)
-        return resized
+gym.register_envs(ale_py)
 
-    def reset(self, obs):
-        frame = self.preprocess(obs)
-        self.last_frame = frame
-        self.frames = deque([frame.copy() for _ in range(self.frame_stack)], maxlen=self.frame_stack)
-        return np.stack(self.frames, axis=0)
 
-    def step(self, obs):
-        frame = self.preprocess(obs)
-        pooled = np.maximum(self.last_frame, frame) if self.last_frame is not None else frame
-        self.last_frame = frame
-        self.frames.append(pooled)
-        stacked = np.stack(self.frames, axis=0)
-        return stacked
-        
 def evaluate(args):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -71,24 +27,29 @@ def evaluate(args):
     preprocessor = AtariPreprocessor()
     num_actions = env.action_space.n
 
-    model = DQN(4, num_actions).to(device)
-    model.load_state_dict(torch.load(args.model_path, map_location=device))
+    state_dict = _migrate_dqn_state_dict(
+        torch.load(args.model_path, map_location=device, weights_only=True)
+    )
+    dueling = any(k.startswith("value_stream") for k in state_dict)
+    model = DQN(num_actions, dueling=dueling).to(device)
+    model.load_state_dict(state_dict)
     model.eval()
 
-    os.makedirs(args.output_dir, exist_ok=True)
+    if args.record:
+        os.makedirs(args.output_dir, exist_ok=True)
 
-    rewards = []  # ADDED: collect rewards for summary
+    rewards = []
     for ep in range(args.episodes):
-        obs, _ = env.reset(seed=args.seed + ep)
+        ep_seed = args.seed + ep
+        obs, _ = env.reset(seed=ep_seed)
         state = preprocessor.reset(obs)
         done = False
         total_reward = 0
         frames = []
-        frame_idx = 0
 
         while not done:
-            frame = env.render()
-            frames.append(frame)
+            if args.record:
+                frames.append(env.render())
 
             state_tensor = torch.from_numpy(state).float().unsqueeze(0).to(device)
             with torch.no_grad():
@@ -98,24 +59,31 @@ def evaluate(args):
             done = terminated or truncated
             total_reward += reward
             state = preprocessor.step(next_obs)
-            frame_idx += 1
 
-        rewards.append(total_reward)  # ADDED
-        out_path = os.path.join(args.output_dir, f"eval_ep{ep}.mp4")
-        with imageio.get_writer(out_path, fps=30) as video:
-            for f in frames:
-                video.append_data(f)
-        print(f"Saved episode {ep} (seed={args.seed + ep}) with total reward {total_reward} → {out_path}")
+        rewards.append(total_reward)
 
-    # ADDED: print summary statistics
-    print(f"\nAverage ({args.episodes} episodes): {np.mean(rewards):.2f}  |  Min: {np.min(rewards):.1f}  Max: {np.max(rewards):.1f}")
-    # END ADDED
+        if args.record:
+            out_path = os.path.join(args.output_dir, f"eval_ep{ep}_seed{ep_seed}.mp4")
+            with imageio.get_writer(out_path, fps=30, macro_block_size=1) as video:
+                for frame in frames:
+                    video.append_data(frame)
+            print(f"Saved episode {ep} (seed={ep_seed}) with total reward {total_reward} -> {out_path}")
+        else:
+            print(f"Episode {ep} (seed={ep_seed}) total reward: {total_reward}")
+
+    print(
+        f"\nAverage ({args.episodes} episodes): {np.mean(rewards):.2f}  |  "
+        f"Min: {np.min(rewards):.1f}  Max: {np.max(rewards):.1f}"
+    )
+    env.close()
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--model-path", type=str, required=True, help="Path to trained .pt model")
     parser.add_argument("--output-dir", type=str, default="./eval_videos")
-    parser.add_argument("--episodes", type=int, default=10)
-    parser.add_argument("--seed", type=int, default=313551076, help="Random seed for evaluation")
+    parser.add_argument("--episodes", type=int, default=20)
+    parser.add_argument("--seed", type=int, default=0, help="Base seed for evaluation; episodes use seed, seed+1, ...")
+    parser.add_argument("--record", action="store_true", help="Save mp4 videos for each evaluation episode")
     args = parser.parse_args()
     evaluate(args)

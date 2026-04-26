@@ -28,26 +28,66 @@ def init_weights(m):
             nn.init.constant_(m.bias, 0)
 
 
+def _migrate_dqn_state_dict(sd):
+    """Remap legacy self.network.* keys (monolithic Sequential) to the current
+    self.conv.* / self.fc.* layout so old checkpoints can still be loaded."""
+    if not any(k.startswith("network.") for k in sd):
+        return sd
+    # old network index → new prefix + new index
+    _remap = {"0": ("conv", "0"), "2": ("conv", "2"), "4": ("conv", "4"),
+              "7": ("fc",   "0"), "9": ("fc",   "2")}
+    new_sd = {}
+    for k, v in sd.items():
+        if k.startswith("network."):
+            parts = k.split(".", 2)   # ["network", idx, "weight"/"bias"]
+            mapping = _remap.get(parts[1])
+            if mapping:
+                new_sd[f"{mapping[0]}.{mapping[1]}.{parts[2]}"] = v
+            # ReLU / Flatten have no params, nothing to remap
+        else:
+            new_sd[k] = v
+    return new_sd
+
+
 class DQN(nn.Module):
     """
         Atari CNN DQN (matches test_model.py's architecture for Task 2/3).
         Input: (batch, 4, 84, 84); /255 normalization applied in forward.
+        dueling=True splits the FC head into Value + Advantage streams.
     """
-    def __init__(self, num_actions):
+    def __init__(self, num_actions, dueling=False):
         super(DQN, self).__init__()
+        self.dueling = dueling
         ########## YOUR CODE HERE (5~10 lines) ##########
-        self.network = nn.Sequential(
+        self.conv = nn.Sequential(
             nn.Conv2d(4, 32, kernel_size=8, stride=4), nn.ReLU(),
             nn.Conv2d(32, 64, kernel_size=4, stride=2), nn.ReLU(),
             nn.Conv2d(64, 64, kernel_size=3, stride=1), nn.ReLU(),
             nn.Flatten(),
-            nn.Linear(64 * 7 * 7, 512), nn.ReLU(),
-            nn.Linear(512, num_actions)
         )
+        if dueling:
+            self.value_stream = nn.Sequential(
+                nn.Linear(64 * 7 * 7, 512), nn.ReLU(),
+                nn.Linear(512, 1)
+            )
+            self.advantage_stream = nn.Sequential(
+                nn.Linear(64 * 7 * 7, 512), nn.ReLU(),
+                nn.Linear(512, num_actions)
+            )
+        else:
+            self.fc = nn.Sequential(
+                nn.Linear(64 * 7 * 7, 512), nn.ReLU(),
+                nn.Linear(512, num_actions)
+            )
         ########## END OF YOUR CODE ##########
 
     def forward(self, x):
-        return self.network(x / 255.0)
+        feat = self.conv(x / 255.0)
+        if self.dueling:
+            v = self.value_stream(feat)
+            a = self.advantage_stream(feat)
+            return v + a - a.mean(dim=1, keepdim=True)
+        return self.fc(feat)
 
 
 class DQNMLP(nn.Module):
@@ -406,6 +446,7 @@ class DQNAgent:
         # Task 3 enhancement flags
         self.use_per = bool(getattr(args, 'use_per', False))
         self.use_double = bool(getattr(args, 'use_double', False))
+        self.use_dueling = bool(getattr(args, 'use_dueling', False))
         self.n_step = int(getattr(args, 'n_step', 1))
         self.per_alpha = float(getattr(args, 'per_alpha', 0.6))
         self.per_beta_start = float(getattr(args, 'per_beta', 0.4))
@@ -417,8 +458,8 @@ class DQNAgent:
 
         if self.is_atari:
             self.preprocessor = AtariPreprocessor()
-            self.q_net = DQN(self.num_actions).to(self.device)
-            self.target_net = DQN(self.num_actions).to(self.device)
+            self.q_net = DQN(self.num_actions, dueling=self.use_dueling).to(self.device)
+            self.target_net = DQN(self.num_actions, dueling=self.use_dueling).to(self.device)
             if self.use_per:
                 base_buffer = PrioritizedReplayBuffer(
                     args.memory_size, alpha=self.per_alpha, beta=self.per_beta_start
@@ -470,6 +511,12 @@ class DQNAgent:
         self.noop_step_count = 0
         self._seeded_single = False
         self.last_train_stats = {}
+        self.max_env_steps = int(getattr(args, 'max_env_steps', 0))
+
+        # Action histogram diagnostics (reset every 1000 env steps)
+        self._action_counts = np.zeros(self.num_actions, dtype=np.int64)
+        self._random_count = 0
+        self._greedy_count = 0
 
     def _reset_state(self, obs):
         if self.is_atari:
@@ -509,11 +556,16 @@ class DQNAgent:
 
     def select_action(self, state):
         if random.random() < self.epsilon:
-            return random.randint(0, self.num_actions - 1)
-        state_tensor = torch.from_numpy(np.asarray(state)).float().unsqueeze(0).to(self.device)
-        with torch.no_grad():
-            q_values = self.q_net(state_tensor)
-        return q_values.argmax().item()
+            action = random.randint(0, self.num_actions - 1)
+            self._random_count += 1
+        else:
+            state_tensor = torch.from_numpy(np.asarray(state)).float().unsqueeze(0).to(self.device)
+            with torch.no_grad():
+                q_values = self.q_net(state_tensor)
+            action = q_values.argmax().item()
+            self._greedy_count += 1
+        self._action_counts[action] += 1
+        return action
 
     def save_checkpoint(self, ep):
         path = os.path.join(self.save_dir, "checkpoint.pt")
@@ -537,9 +589,9 @@ class DQNAgent:
             print(f"[Drive] Checkpoint backed up → {backup}")
 
     def load_checkpoint(self, path):
-        ckpt = torch.load(path, map_location=self.device)
-        self.q_net.load_state_dict(ckpt['q_net'])
-        self.target_net.load_state_dict(ckpt['target_net'])
+        ckpt = torch.load(path, map_location=self.device, weights_only=True)
+        self.q_net.load_state_dict(_migrate_dqn_state_dict(ckpt['q_net']))
+        self.target_net.load_state_dict(_migrate_dqn_state_dict(ckpt['target_net']))
         self.optimizer.load_state_dict(ckpt['optimizer'])
         self.epsilon = ckpt['epsilon']
         self.env_count = ckpt['env_count']
@@ -564,12 +616,26 @@ class DQNAgent:
                 obs, _ = self.env.reset()
 
             if self.is_atari and self.noop_max > 0:
+                noop_early_stop = False
                 for _ in range(random.randint(0, self.noop_max)):
                     obs, _, terminated, truncated, _ = self.env.step(0)
                     self.env_count += 1
                     self.noop_step_count += 1
                     if terminated or truncated:
                         obs, _ = self.env.reset()
+                    if self.task == 3:
+                        for milestone in self.task3_milestones:
+                            if self.env_count >= milestone and milestone not in self.saved_milestones:
+                                m_path = os.path.join(self.save_dir, f"LAB5_{self.student_id}_task3_{milestone}.pt")
+                                torch.save(self.q_net.state_dict(), m_path)
+                                self.saved_milestones.add(milestone)
+                                print(f"[Milestone] Saved {milestone} steps → {m_path}")
+                    if self.max_env_steps > 0 and self.env_count >= self.max_env_steps:
+                        print(f"[Stop] Reached max_env_steps={self.max_env_steps} during noop reset")
+                        noop_early_stop = True
+                        break
+                if noop_early_stop:
+                    return
 
             state = self._reset_state(obs)
             if isinstance(self.memory, NStepWrapper):
@@ -615,20 +681,37 @@ class DQNAgent:
 
                 if self.env_count % 1000 == 0:
                     print(f"[Collect] Ep: {ep} Step: {step_count} SC: {self.env_count} UC: {self.train_count} Eps: {self.epsilon:.4f}")
+                    total_actions = self._action_counts.sum()
+                    total_decisions = max(1, self._random_count + self._greedy_count)
                     log_data = {
                         "Episode": ep,
                         "Step Count": step_count,
                         "Env Step Count": self.env_count,
                         "Update Count": self.train_count,
                         "Epsilon": self.epsilon,
-                        "Noop Step Count": self.noop_step_count
+                        "Noop Step Count": self.noop_step_count,
+                        "Action/Random Ratio": self._random_count / total_decisions,
+                        "Action/Greedy Ratio": self._greedy_count / total_decisions,
                     }
+                    if total_actions > 0:
+                        action_meanings = self.env.unwrapped.get_action_meanings() if hasattr(self.env.unwrapped, 'get_action_meanings') else [str(i) for i in range(self.num_actions)]
+                        for i, count in enumerate(self._action_counts):
+                            label = action_meanings[i] if i < len(action_meanings) else str(i)
+                            log_data[f"Action/{label}"] = int(count) / total_actions
                     log_data.update(self.last_train_stats)
                     wandb.log(log_data)
+                    # Reset histogram counters
+                    self._action_counts[:] = 0
+                    self._random_count = 0
+                    self._greedy_count = 0
                     ########## YOUR CODE HERE  ##########
                     # Add additional wandb logs for debugging if needed
 
                     ########## END OF YOUR CODE ##########
+
+                if self.max_env_steps > 0 and self.env_count >= self.max_env_steps:
+                    print(f"[Stop] Reached max_env_steps={self.max_env_steps}")
+                    return
             print(f"[Eval] Ep: {ep} Total Reward: {total_reward} SC: {self.env_count} UC: {self.train_count} Eps: {self.epsilon:.4f}")
             log_data = {
                 "Episode": ep,
@@ -818,6 +901,8 @@ if __name__ == "__main__":
     parser.add_argument("--per-beta", type=float, default=0.4)
     parser.add_argument("--per-beta-anneal-steps", type=int, default=1000000)
     parser.add_argument("--noop-max", type=int, default=0, help="Atari training-only NoopReset max no-op actions after reset (0=disabled)")
+    parser.add_argument("--use-dueling", action="store_true", help="Use Dueling DQN architecture (Value + Advantage streams)")
+    parser.add_argument("--max-env-steps", type=int, default=0, help="Stop training after this many env steps (0=disabled)")
     parser.add_argument("--seed", type=int, default=42, help="Global random seed")
     args = parser.parse_args()
 
