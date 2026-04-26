@@ -657,10 +657,9 @@ class DQNAgent:
                     shutil.copy(model_path, os.path.join(snap_dir, f"model_ep{ep}.pt"))
                     print(f"[Drive] Snapshot synced → {snap_dir}/model_ep{ep}.pt")
 
-            # Atari eval: every 50 episodes, 20-episode average (matches Task 3 grading protocol)
-            # CartPole eval: every 20 episodes, single episode (fast, stable)
-            eval_every = 50 if self.is_atari else 20
-            eval_n = 20 if self.is_atari else 1
+            # Match the starter-code training monitor: evaluate one episode every 20 episodes.
+            eval_every = 20
+            eval_n = 1
             if ep % eval_every == 0:
                 eval_reward = self.evaluate(n_episodes=eval_n)
                 if eval_reward > self.best_reward:
