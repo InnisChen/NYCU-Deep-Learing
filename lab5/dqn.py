@@ -73,6 +73,7 @@ class AtariPreprocessor:
     def __init__(self, frame_stack=4):
         self.frame_stack = frame_stack
         self.frames = deque(maxlen=frame_stack)
+        self.last_frame = None
 
     def preprocess(self, obs):
         gray = cv2.cvtColor(obs, cv2.COLOR_RGB2GRAY)
@@ -81,12 +82,15 @@ class AtariPreprocessor:
 
     def reset(self, obs):
         frame = self.preprocess(obs)
-        self.frames = deque([frame for _ in range(self.frame_stack)], maxlen=self.frame_stack)
+        self.last_frame = frame
+        self.frames = deque([frame.copy() for _ in range(self.frame_stack)], maxlen=self.frame_stack)
         return np.stack(self.frames, axis=0)
 
     def step(self, obs):
         frame = self.preprocess(obs)
-        self.frames.append(frame)
+        pooled = np.maximum(self.last_frame, frame) if self.last_frame is not None else frame
+        self.last_frame = frame
+        self.frames.append(pooled)
         return np.stack(self.frames, axis=0)
 
 
@@ -461,6 +465,10 @@ class DQNAgent:
         self.checkpoint_freq = args.checkpoint_freq
         self.task3_milestones = [600000, 1000000, 1500000, 2000000, 2500000]
         self.saved_milestones = set()
+        self.seed = getattr(args, 'seed', None)
+        self.noop_max = int(getattr(args, 'noop_max', 0))
+        self.noop_step_count = 0
+        self._seeded_single = False
 
     def _reset_state(self, obs):
         if self.is_atari:
@@ -544,8 +552,23 @@ class DQNAgent:
         return start_ep
 
     def run(self, episodes=1000, start_ep=0):
+        if start_ep > 0:
+            self._seeded_single = True
+
         for ep in range(start_ep, episodes):
-            obs, _ = self.env.reset()
+            if not self._seeded_single and self.seed is not None:
+                obs, _ = self.env.reset(seed=self.seed)
+                self._seeded_single = True
+            else:
+                obs, _ = self.env.reset()
+
+            if self.is_atari and self.noop_max > 0:
+                for _ in range(random.randint(0, self.noop_max)):
+                    obs, _, terminated, truncated, _ = self.env.step(0)
+                    self.env_count += 1
+                    self.noop_step_count += 1
+                    if terminated or truncated:
+                        obs, _ = self.env.reset()
 
             state = self._reset_state(obs)
             if isinstance(self.memory, NStepWrapper):
@@ -596,7 +619,8 @@ class DQNAgent:
                         "Step Count": step_count,
                         "Env Step Count": self.env_count,
                         "Update Count": self.train_count,
-                        "Epsilon": self.epsilon
+                        "Epsilon": self.epsilon,
+                        "Noop Step Count": self.noop_step_count
                     })
                     ########## YOUR CODE HERE  ##########
                     # Add additional wandb logs for debugging if needed
@@ -608,7 +632,8 @@ class DQNAgent:
                 "Total Reward": total_reward,
                 "Env Step Count": self.env_count,
                 "Update Count": self.train_count,
-                "Epsilon": self.epsilon
+                "Epsilon": self.epsilon,
+                "Noop Step Count": self.noop_step_count
             })
             ########## YOUR CODE HERE  ##########
             # Add additional wandb logs for debugging if needed
@@ -627,10 +652,10 @@ class DQNAgent:
                     shutil.copy(model_path, os.path.join(snap_dir, f"model_ep{ep}.pt"))
                     print(f"[Drive] Snapshot synced → {snap_dir}/model_ep{ep}.pt")
 
-            # Atari eval: every 50 episodes, 3-episode average (less noisy for best-model selection)
+            # Atari eval: every 50 episodes, 20-episode average (matches Task 3 grading protocol)
             # CartPole eval: every 20 episodes, single episode (fast, stable)
             eval_every = 50 if self.is_atari else 20
-            eval_n = 3 if self.is_atari else 1
+            eval_n = 20 if self.is_atari else 1
             if ep % eval_every == 0:
                 eval_reward = self.evaluate(n_episodes=eval_n)
                 if eval_reward > self.best_reward:
@@ -651,7 +676,8 @@ class DQNAgent:
                 wandb.log({
                     "Env Step Count": self.env_count,
                     "Update Count": self.train_count,
-                    "Eval Reward": eval_reward
+                    "Eval Reward": eval_reward,
+                    "Eval Episodes": eval_n
                 })
 
     def evaluate(self, n_episodes=1):
@@ -773,6 +799,7 @@ if __name__ == "__main__":
     parser.add_argument("--per-alpha", type=float, default=0.6)
     parser.add_argument("--per-beta", type=float, default=0.4)
     parser.add_argument("--per-beta-anneal-steps", type=int, default=1000000)
+    parser.add_argument("--noop-max", type=int, default=0, help="Atari training-only NoopReset max no-op actions after reset (0=disabled)")
     parser.add_argument("--seed", type=int, default=42, help="Global random seed")
     args = parser.parse_args()
 

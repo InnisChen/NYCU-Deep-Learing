@@ -33,6 +33,7 @@ class AtariPreprocessor:
     def __init__(self, frame_stack=4):
         self.frame_stack = frame_stack
         self.frames = deque(maxlen=frame_stack)
+        self.last_frame = None
 
     def preprocess(self, obs):
         if len(obs.shape) == 3 and obs.shape[2] == 3:
@@ -44,12 +45,15 @@ class AtariPreprocessor:
 
     def reset(self, obs):
         frame = self.preprocess(obs)
-        self.frames = deque([frame for _ in range(self.frame_stack)], maxlen=self.frame_stack)
+        self.last_frame = frame
+        self.frames = deque([frame.copy() for _ in range(self.frame_stack)], maxlen=self.frame_stack)
         return np.stack(self.frames, axis=0)
 
     def step(self, obs):
         frame = self.preprocess(obs)
-        self.frames.append(frame.copy())
+        pooled = np.maximum(self.last_frame, frame) if self.last_frame is not None else frame
+        self.last_frame = frame
+        self.frames.append(pooled)
         stacked = np.stack(self.frames, axis=0)
         return stacked
         
