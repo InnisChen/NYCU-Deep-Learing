@@ -512,6 +512,8 @@ class DQNAgent:
         self._seeded_single = False
         self.last_train_stats = {}
         self.max_env_steps = int(getattr(args, 'max_env_steps', 0))
+        self.wandb_log_interval = int(getattr(args, 'wandb_log_interval', 1000))
+        self.wandb_debug = bool(getattr(args, 'wandb_debug', False))
 
         # Action histogram diagnostics (reset every 1000 env steps)
         self._action_counts = np.zeros(self.num_actions, dtype=np.int64)
@@ -668,7 +670,8 @@ class DQNAgent:
                             torch.save(self.q_net.state_dict(), m_path)
                             self.saved_milestones.add(milestone)
                             print(f"[Milestone] Saved {milestone} steps → {m_path}")
-                            wandb.log({"Milestone Steps": milestone, "Env Step Count": self.env_count})
+                            if self.wandb_debug:
+                                wandb.log({"Milestone Steps": milestone, "Env Step Count": self.env_count})
                             drive_ckpt_dir = os.environ.get("DRIVE_CKPT_DIR", "")
                             if drive_ckpt_dir and os.path.isdir(drive_ckpt_dir):
                                 import shutil
@@ -679,26 +682,30 @@ class DQNAgent:
                 if self.checkpoint_freq > 0 and self.env_count % self.checkpoint_freq == 0:
                     self.save_checkpoint(ep)
 
-                if self.env_count % 1000 == 0:
+                if self.wandb_log_interval > 0 and self.env_count % self.wandb_log_interval == 0:
                     print(f"[Collect] Ep: {ep} Step: {step_count} SC: {self.env_count} UC: {self.train_count} Eps: {self.epsilon:.4f}")
                     total_actions = self._action_counts.sum()
                     total_decisions = max(1, self._random_count + self._greedy_count)
                     log_data = {
-                        "Episode": ep,
-                        "Step Count": step_count,
                         "Env Step Count": self.env_count,
-                        "Update Count": self.train_count,
                         "Epsilon": self.epsilon,
-                        "Noop Step Count": self.noop_step_count,
-                        "Action/Random Ratio": self._random_count / total_decisions,
-                        "Action/Greedy Ratio": self._greedy_count / total_decisions,
                     }
-                    if total_actions > 0:
+                    if self.wandb_debug:
+                        log_data.update({
+                            "Episode": ep,
+                            "Step Count": step_count,
+                            "Update Count": self.train_count,
+                            "Noop Step Count": self.noop_step_count,
+                            "Action/Random Ratio": self._random_count / total_decisions,
+                            "Action/Greedy Ratio": self._greedy_count / total_decisions,
+                        })
+                    if self.wandb_debug and total_actions > 0:
                         action_meanings = self.env.unwrapped.get_action_meanings() if hasattr(self.env.unwrapped, 'get_action_meanings') else [str(i) for i in range(self.num_actions)]
                         for i, count in enumerate(self._action_counts):
                             label = action_meanings[i] if i < len(action_meanings) else str(i)
                             log_data[f"Action/{label}"] = int(count) / total_actions
-                    log_data.update(self.last_train_stats)
+                    if self.wandb_debug:
+                        log_data.update(self.last_train_stats)
                     wandb.log(log_data)
                     # Reset histogram counters
                     self._action_counts[:] = 0
@@ -714,14 +721,17 @@ class DQNAgent:
                     return
             print(f"[Eval] Ep: {ep} Total Reward: {total_reward} SC: {self.env_count} UC: {self.train_count} Eps: {self.epsilon:.4f}")
             log_data = {
-                "Episode": ep,
                 "Total Reward": total_reward,
                 "Env Step Count": self.env_count,
-                "Update Count": self.train_count,
                 "Epsilon": self.epsilon,
-                "Noop Step Count": self.noop_step_count
             }
-            log_data.update(self.last_train_stats)
+            if self.wandb_debug:
+                log_data.update({
+                    "Episode": ep,
+                    "Update Count": self.train_count,
+                    "Noop Step Count": self.noop_step_count
+                })
+                log_data.update(self.last_train_stats)
             wandb.log(log_data)
             ########## YOUR CODE HERE  ##########
             # Add additional wandb logs for debugging if needed
@@ -762,9 +772,7 @@ class DQNAgent:
                 print(f"[TrueEval] Ep: {ep} Eval Reward: {eval_reward:.2f} SC: {self.env_count} UC: {self.train_count}")
                 wandb.log({
                     "Env Step Count": self.env_count,
-                    "Update Count": self.train_count,
                     "Eval Reward": eval_reward,
-                    "Eval Episodes": eval_n
                 })
 
     def evaluate(self, n_episodes=1):
@@ -905,6 +913,8 @@ if __name__ == "__main__":
     parser.add_argument("--use-dueling", action="store_true", help="Use Dueling DQN architecture (Value + Advantage streams)")
     parser.add_argument("--max-env-steps", type=int, default=0, help="Stop training after this many env steps (0=disabled)")
     parser.add_argument("--seed", type=int, default=42, help="Global random seed")
+    parser.add_argument("--wandb-log-interval", type=int, default=1000, help="Log lightweight W&B scalars every N env steps (0=disabled)")
+    parser.add_argument("--wandb-debug", action="store_true", help="Log extra W&B diagnostics such as action ratios and train stats")
     args = parser.parse_args()
 
     import random
@@ -918,7 +928,10 @@ if __name__ == "__main__":
 
     project_name = "DLP-Lab5-DQN-Atari" if "ALE" in args.env_name else "DLP-Lab5-DQN-CartPole"
     wandb.init(project=project_name, name=args.wandb_run_name, save_code=True)
-    wandb.define_metric("Env Step Count")
+    try:
+        wandb.define_metric("Env Step Count", hidden=True)
+    except TypeError:
+        wandb.define_metric("Env Step Count")
     wandb.define_metric("*", step_metric="Env Step Count")
 
     agent = DQNAgent(env_name=args.env_name, args=args)
