@@ -481,7 +481,7 @@ class DQNAgent:
 
         self.q_net.apply(init_weights)
         self.target_net.load_state_dict(self.q_net.state_dict())
-        self.optimizer = optim.Adam(self.q_net.parameters(), lr=args.lr)
+        self.optimizer = optim.Adam(self.q_net.parameters(), lr=args.lr, eps=args.adam_eps)
         self.scaler = torch.amp.GradScaler('cuda', enabled=torch.cuda.is_available())
 
         self.batch_size = args.batch_size
@@ -883,6 +883,7 @@ if __name__ == "__main__":
     parser.add_argument("--batch-size", type=int, default=32)
     parser.add_argument("--memory-size", type=int, default=100000)
     parser.add_argument("--lr", type=float, default=0.0001)
+    parser.add_argument("--adam-eps", type=float, default=1e-8, help="Adam optimizer epsilon")
     parser.add_argument("--discount-factor", type=float, default=0.99)
     parser.add_argument("--epsilon-start", type=float, default=1.0)
     parser.add_argument("--epsilon-decay", type=float, default=0.999999)
