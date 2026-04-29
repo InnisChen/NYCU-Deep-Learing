@@ -497,6 +497,9 @@ class DQNAgent:
         self.max_episode_steps = args.max_episode_steps
         self.replay_start_size = args.replay_start_size
         self.target_update_frequency = args.target_update_frequency
+        self.soft_target_tau = float(getattr(args, 'soft_target_tau', 0.0))
+        if not 0.0 <= self.soft_target_tau <= 1.0:
+            raise ValueError(f"soft_target_tau must be in [0, 1], got {self.soft_target_tau}")
         self.train_per_step = args.train_per_step
         self.save_dir = args.save_dir
         os.makedirs(self.save_dir, exist_ok=True)
@@ -555,6 +558,14 @@ class DQNAgent:
             return
         frac = min(1.0, self.env_count / max(1, self.per_beta_anneal_steps))
         per.beta = self.per_beta_start + frac * (1.0 - self.per_beta_start)
+
+    def _soft_update_target(self):
+        tau = self.soft_target_tau
+        with torch.no_grad():
+            for target_param, q_param in zip(self.target_net.parameters(), self.q_net.parameters()):
+                target_param.data.mul_(1.0 - tau).add_(q_param.data, alpha=tau)
+            for target_buffer, q_buffer in zip(self.target_net.buffers(), self.q_net.buffers()):
+                target_buffer.copy_(q_buffer)
 
     def select_action(self, state):
         if random.random() < self.epsilon:
@@ -856,7 +867,9 @@ class DQNAgent:
             td_np = td_errors.detach().abs().cpu().numpy()
             self.memory.update_priorities(indices, td_np)
 
-        if self.train_count % self.target_update_frequency == 0:
+        if self.soft_target_tau > 0.0:
+            self._soft_update_target()
+        elif self.train_count % self.target_update_frequency == 0:
             self.target_net.load_state_dict(self.q_net.state_dict())
 
         if self.train_count % 100 == 0 or not self.last_train_stats:
@@ -871,6 +884,8 @@ class DQNAgent:
                 "Train/Grad Norm": float(grad_norm.detach().cpu().item() if torch.is_tensor(grad_norm) else grad_norm),
                 "Train/Replay Size": len(self.memory),
             }
+            if self.soft_target_tau > 0.0:
+                self.last_train_stats["Train/Soft Target Tau"] = self.soft_target_tau
             if per is not None:
                 self.last_train_stats.update({
                     "Train/PER Beta": float(per.beta),
@@ -899,6 +914,7 @@ if __name__ == "__main__":
     parser.add_argument("--epsilon-decay-type", type=str, default="exp", choices=["exp", "linear"])
     parser.add_argument("--epsilon-decay-steps", type=int, default=250000, help="Linear decay: env steps over which epsilon decays")
     parser.add_argument("--target-update-frequency", type=int, default=1000)
+    parser.add_argument("--soft-target-tau", type=float, default=0.0, help="Soft target update tau (0=use hard target updates)")
     parser.add_argument("--replay-start-size", type=int, default=50000)
     parser.add_argument("--max-episode-steps", type=int, default=10000)
     parser.add_argument("--train-per-step", type=int, default=1)
