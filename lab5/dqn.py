@@ -483,6 +483,11 @@ class DQNAgent:
         self.target_net.load_state_dict(self.q_net.state_dict())
         self.optimizer = optim.Adam(self.q_net.parameters(), lr=args.lr, eps=args.adam_eps)
         self.scaler = torch.amp.GradScaler('cuda', enabled=torch.cuda.is_available())
+        self.base_lr = float(args.lr)
+        self.lr_decay_step = int(getattr(args, 'lr_decay_step', 0))
+        lr_after_decay = getattr(args, 'lr_after_decay', None)
+        self.lr_after_decay = None if lr_after_decay is None else float(lr_after_decay)
+        self.lr_decayed = False
 
         self.batch_size = args.batch_size
         self.gamma = gamma
@@ -567,6 +572,18 @@ class DQNAgent:
             for target_buffer, q_buffer in zip(self.target_net.buffers(), self.q_net.buffers()):
                 target_buffer.copy_(q_buffer)
 
+    def _maybe_decay_lr(self):
+        if (
+            self.lr_decay_step > 0
+            and self.lr_after_decay is not None
+            and self.env_count >= self.lr_decay_step
+            and not self.lr_decayed
+        ):
+            for group in self.optimizer.param_groups:
+                group["lr"] = self.lr_after_decay
+            self.lr_decayed = True
+            print(f"[LR Decay] env_count={self.env_count}, lr -> {self.lr_after_decay}")
+
     def select_action(self, state):
         if random.random() < self.epsilon:
             action = random.randint(0, self.num_actions - 1)
@@ -593,6 +610,7 @@ class DQNAgent:
             'best_reward': self.best_reward,
             'episode': ep,
             'saved_milestones': list(self.saved_milestones),
+            'lr_decayed': self.lr_decayed,
         }, path)
         drive_ckpt_dir = os.environ.get("DRIVE_CKPT_DIR", "")
         if drive_ckpt_dir and os.path.isdir(drive_ckpt_dir):
@@ -611,6 +629,7 @@ class DQNAgent:
         self.train_count = ckpt['train_count']
         self.best_reward = ckpt['best_reward']
         self.saved_milestones = set(ckpt.get('saved_milestones', []))
+        self.lr_decayed = bool(ckpt.get('lr_decayed', self.lr_decayed))
         if 'scaler' in ckpt:
             self.scaler.load_state_dict(ckpt['scaler'])
         start_ep = ckpt['episode'] + 1
@@ -812,6 +831,8 @@ class DQNAgent:
         if len(self.memory) < self.replay_start_size:
             return
 
+        self._maybe_decay_lr()
+
         # Decay function for epsilin-greedy exploration
         self._update_epsilon()
         self._update_beta()
@@ -883,6 +904,7 @@ class DQNAgent:
                 "Train/TD Error Max": float(td_errors.detach().abs().max().cpu().item()),
                 "Train/Grad Norm": float(grad_norm.detach().cpu().item() if torch.is_tensor(grad_norm) else grad_norm),
                 "Train/Replay Size": len(self.memory),
+                "Train/LR": float(self.optimizer.param_groups[0]["lr"]),
             }
             if self.soft_target_tau > 0.0:
                 self.last_train_stats["Train/Soft Target Tau"] = self.soft_target_tau
@@ -907,6 +929,8 @@ if __name__ == "__main__":
     parser.add_argument("--memory-size", type=int, default=100000)
     parser.add_argument("--lr", type=float, default=0.0001)
     parser.add_argument("--adam-eps", type=float, default=1e-8, help="Adam optimizer epsilon")
+    parser.add_argument("--lr-decay-step", type=int, default=0, help="Env step to change optimizer LR after (0=disabled)")
+    parser.add_argument("--lr-after-decay", type=float, default=None, help="Optimizer LR after lr-decay-step")
     parser.add_argument("--discount-factor", type=float, default=0.99)
     parser.add_argument("--epsilon-start", type=float, default=1.0)
     parser.add_argument("--epsilon-decay", type=float, default=0.999999)
