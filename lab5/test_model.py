@@ -67,12 +67,12 @@ def evaluate(args):
             with imageio.get_writer(out_path, fps=30, macro_block_size=1) as video:
                 for frame in frames:
                     video.append_data(frame)
-            print(f"Saved episode {ep} (seed={ep_seed}) with total reward {total_reward} -> {out_path}")
+            print(f"Saved eval episode {ep} (seed={ep_seed}) with reward {total_reward} -> {out_path}")
         else:
-            print(f"Episode {ep} (seed={ep_seed}) total reward: {total_reward}")
+            print(f"Eval Episode {ep} (seed={ep_seed}) reward: {total_reward}")
 
     print(
-        f"\nAverage ({args.episodes} episodes): {np.mean(rewards):.2f}  |  "
+        f"\nEval Reward Average ({args.episodes} episodes): {np.mean(rewards):.2f}  |  "
         f"Min: {np.min(rewards):.1f}  Max: {np.max(rewards):.1f}"
     )
     env.close()
