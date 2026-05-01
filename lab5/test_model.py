@@ -8,7 +8,7 @@ import imageio
 import numpy as np
 import torch
 
-from dqn import AtariPreprocessor, DQN, _migrate_dqn_state_dict
+from dqn import AtariPreprocessor, DQN, DQNMLP, _migrate_dqn_state_dict
 
 gym.register_envs(ale_py)
 
@@ -20,18 +20,22 @@ def evaluate(args):
     np.random.seed(args.seed)
     torch.manual_seed(args.seed)
 
-    env = gym.make("ALE/Pong-v5", render_mode="rgb_array")
+    env = gym.make(args.env_name, render_mode="rgb_array")
     env.action_space.seed(args.seed)
     env.observation_space.seed(args.seed)
 
-    preprocessor = AtariPreprocessor()
+    is_atari = "ALE" in args.env_name
+    preprocessor = AtariPreprocessor() if is_atari else None
     num_actions = env.action_space.n
 
-    state_dict = _migrate_dqn_state_dict(
-        torch.load(args.model_path, map_location=device, weights_only=True)
-    )
-    dueling = any(k.startswith("value_stream") for k in state_dict)
-    model = DQN(num_actions, dueling=dueling).to(device)
+    state_dict = torch.load(args.model_path, map_location=device, weights_only=True)
+    if is_atari:
+        state_dict = _migrate_dqn_state_dict(state_dict)
+        dueling = any(k.startswith("value_stream") for k in state_dict)
+        model = DQN(num_actions, dueling=dueling).to(device)
+    else:
+        state_dim = env.observation_space.shape[0]
+        model = DQNMLP(num_actions, state_dim=state_dim).to(device)
     model.load_state_dict(state_dict)
     model.eval()
 
@@ -42,7 +46,7 @@ def evaluate(args):
     for ep in range(args.episodes):
         ep_seed = args.seed + ep
         obs, _ = env.reset(seed=ep_seed)
-        state = preprocessor.reset(obs)
+        state = preprocessor.reset(obs) if is_atari else np.asarray(obs, dtype=np.float32)
         done = False
         total_reward = 0
         frames = []
@@ -58,7 +62,7 @@ def evaluate(args):
             next_obs, reward, terminated, truncated, _ = env.step(action)
             done = terminated or truncated
             total_reward += reward
-            state = preprocessor.step(next_obs)
+            state = preprocessor.step(next_obs) if is_atari else np.asarray(next_obs, dtype=np.float32)
 
         rewards.append(total_reward)
 
@@ -81,6 +85,7 @@ def evaluate(args):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--model-path", type=str, required=True, help="Path to trained .pt model")
+    parser.add_argument("--env-name", type=str, default="ALE/Pong-v5")
     parser.add_argument("--output-dir", type=str, default="./eval_videos")
     parser.add_argument("--episodes", type=int, default=20)
     parser.add_argument("--seed", type=int, default=0, help="Base seed for evaluation; episodes use seed, seed+1, ...")
