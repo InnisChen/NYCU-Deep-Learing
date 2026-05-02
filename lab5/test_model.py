@@ -7,10 +7,58 @@ import gymnasium as gym
 import imageio
 import numpy as np
 import torch
+import torch.nn as nn
+import cv2
+from collections import deque
 
 from dqn import AtariPreprocessor, DQN, DQNMLP, _migrate_dqn_state_dict
 
 gym.register_envs(ale_py)
+
+
+class LegacyAtariPreprocessor:
+    """Task 2 snapshots before Task 3 used plain frame stacking without max pooling."""
+    def __init__(self, frame_stack=4):
+        self.frame_stack = frame_stack
+        self.frames = deque(maxlen=frame_stack)
+
+    def preprocess(self, obs):
+        if len(obs.shape) == 3 and obs.shape[2] == 3:
+            gray = cv2.cvtColor(obs, cv2.COLOR_RGB2GRAY)
+        else:
+            gray = obs
+        return cv2.resize(gray, (84, 84), interpolation=cv2.INTER_AREA)
+
+    def reset(self, obs):
+        frame = self.preprocess(obs)
+        self.frames = deque([frame for _ in range(self.frame_stack)], maxlen=self.frame_stack)
+        return np.stack(self.frames, axis=0)
+
+    def step(self, obs):
+        frame = self.preprocess(obs)
+        self.frames.append(frame.copy())
+        return np.stack(self.frames, axis=0)
+
+
+class LegacyAtariDQN(nn.Module):
+    """CNN layout used by early Task 2 checkpoints with network.* state_dict keys."""
+    def __init__(self, input_channels, num_actions):
+        super().__init__()
+        self.network = nn.Sequential(
+            nn.Conv2d(input_channels, 32, kernel_size=8, stride=4),
+            nn.ReLU(),
+            nn.Conv2d(32, 64, kernel_size=4, stride=2),
+            nn.ReLU(),
+            nn.Conv2d(64, 64, kernel_size=3, stride=1),
+            nn.ReLU(),
+            nn.Flatten(),
+            nn.Linear(64 * 7 * 7, 512),
+            nn.ReLU(),
+            nn.Linear(512, num_actions),
+        )
+
+    def forward(self, x):
+        return self.network(x / 255.0)
 
 
 def evaluate(args):
@@ -25,15 +73,21 @@ def evaluate(args):
     env.observation_space.seed(args.seed)
 
     is_atari = "ALE" in args.env_name
-    preprocessor = AtariPreprocessor() if is_atari else None
     num_actions = env.action_space.n
 
     state_dict = torch.load(args.model_path, map_location=device, weights_only=True)
     if is_atari:
-        state_dict = _migrate_dqn_state_dict(state_dict)
-        dueling = any(k.startswith("value_stream") for k in state_dict)
-        model = DQN(num_actions, dueling=dueling).to(device)
+        legacy_task2 = any(k.startswith("network.") for k in state_dict)
+        if legacy_task2:
+            preprocessor = LegacyAtariPreprocessor()
+            model = LegacyAtariDQN(4, num_actions).to(device)
+        else:
+            preprocessor = AtariPreprocessor()
+            state_dict = _migrate_dqn_state_dict(state_dict)
+            dueling = any(k.startswith("value_stream") for k in state_dict)
+            model = DQN(num_actions, dueling=dueling).to(device)
     else:
+        preprocessor = None
         state_dim = env.observation_space.shape[0]
         model = DQNMLP(num_actions, state_dim=state_dim).to(device)
     model.load_state_dict(state_dict)
