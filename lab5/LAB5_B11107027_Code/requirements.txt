@@ -6,3 +6,4 @@ wandb
 numpy
 imageio
 imageio-ffmpeg
+pygame
