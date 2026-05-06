@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import math
+import os
 from pathlib import Path
 from typing import Optional
 
@@ -10,7 +12,7 @@ from torch.amp import GradScaler, autocast
 from torch.utils.data import DataLoader
 from tqdm.auto import tqdm
 
-from .dataset import IClevrDataset, labels_batch_to_multihot, load_object_map
+from .dataset import ConditionDataset, IClevrDataset, labels_batch_to_multihot, load_object_map
 from .diffusion import GaussianDiffusion
 from .ema import EMA
 from .models import ConditionalUNet
@@ -83,11 +85,102 @@ def save_preview(model, diffusion, ema, object_map, args, device, epoch: int) ->
     save_tensor_grid(images, Path(args.save_dir) / "previews" / f"epoch_{epoch:03d}.png", nrow=4)
 
 
-def save_ema_checkpoint(path, model, optimizer, scheduler, scaler, ema, epoch, global_step, config, best_loss):
+def save_ema_checkpoint(path, model, ema, epoch, global_step, config, best_loss, metrics=None):
     ema.store(model)
     ema.copy_to(model)
-    save_checkpoint(path, model, optimizer, scheduler, scaler, None, epoch, global_step, config, best_loss)
+    torch.save(
+        {
+            "epoch": epoch,
+            "global_step": global_step,
+            "model": model.state_dict(),
+            "config": config,
+            "best_loss": best_loss,
+            "metrics": metrics or {},
+        },
+        path,
+    )
     ema.restore(model)
+
+
+def load_evaluator_for_training(meta_dir: str | Path, device: torch.device):
+    if device.type != "cuda":
+        print("Evaluator validation disabled: provided evaluator requires CUDA.")
+        return None
+    meta_dir = Path(meta_dir).resolve()
+    evaluator_path = meta_dir / "evaluator.py"
+    old_cwd = Path.cwd()
+    try:
+        os.chdir(meta_dir)
+        spec = importlib.util.spec_from_file_location("lab6_evaluator_train", evaluator_path)
+        if spec is None or spec.loader is None:
+            raise ImportError(f"Cannot import evaluator from {evaluator_path}")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        evaluator = module.evaluation_model()
+        print("Evaluator loaded for validation.")
+        return evaluator
+    except Exception as exc:
+        print(f"Evaluator validation disabled: {exc}")
+        return None
+    finally:
+        os.chdir(old_cwd)
+
+
+def load_validation_labels(meta_dir: str | Path, device: torch.device):
+    test_dataset = ConditionDataset(meta_dir, split="test")
+    new_test_dataset = ConditionDataset(meta_dir, split="new_test")
+    test_labels = torch.stack([test_dataset[i][0] for i in range(len(test_dataset))], dim=0).to(device)
+    new_test_labels = torch.stack([new_test_dataset[i][0] for i in range(len(new_test_dataset))], dim=0).to(device)
+    return test_labels, new_test_labels
+
+
+@torch.no_grad()
+def run_evaluator_validation(model, diffusion, ema, evaluator, test_labels, new_test_labels, args, device):
+    ema.store(model)
+    ema.copy_to(model)
+    model.eval()
+    try:
+        test_images = diffusion.ddim_sample(
+            model,
+            test_labels,
+            image_size=args.image_size,
+            sample_steps=args.val_sample_steps,
+            cfg_scale=args.val_cfg_scale,
+            eta=args.val_eta,
+        )
+        new_test_images = diffusion.ddim_sample(
+            model,
+            new_test_labels,
+            image_size=args.image_size,
+            sample_steps=args.val_sample_steps,
+            cfg_scale=args.val_cfg_scale,
+            eta=args.val_eta,
+        )
+        test_acc = float(evaluator.eval(test_images, test_labels))
+        new_test_acc = float(evaluator.eval(new_test_images, new_test_labels))
+    finally:
+        ema.restore(model)
+        model.train()
+    avg_acc = (test_acc + new_test_acc) / 2.0
+    return test_acc, new_test_acc, avg_acc
+
+
+def is_backup_epoch(args, epoch: int, stop_training: bool) -> bool:
+    if not args.backup_dir or args.backup_every <= 0:
+        return False
+    return stop_training or epoch == args.epochs or epoch % args.backup_every == 0
+
+
+def is_checkpoint_epoch(args, epoch: int, stop_training: bool) -> bool:
+    if stop_training or epoch == args.epochs:
+        return True
+    return args.save_every > 0 and epoch % args.save_every == 0
+
+
+def is_validation_epoch(args, epoch: int, stop_training: bool) -> bool:
+    if args.val_every <= 0:
+        return False
+    return stop_training or epoch == args.epochs or epoch % args.val_every == 0
 
 
 def train(args) -> None:
@@ -128,6 +221,8 @@ def train(args) -> None:
     start_epoch = 1
     global_step = 0
     best_loss = math.inf
+    best_acc = -math.inf
+    last_val_metrics = {}
     if args.resume:
         ckpt = load_checkpoint(args.resume, device)
         model.load_state_dict(ckpt["model"])
@@ -143,11 +238,16 @@ def train(args) -> None:
         start_epoch = int(ckpt.get("epoch", 0)) + 1
         global_step = int(ckpt.get("global_step", 0))
         best_loss = float(ckpt.get("best_loss", best_loss))
+        metrics = ckpt.get("metrics", {})
+        best_acc = float(metrics.get("best_acc", best_acc))
+        last_val_metrics = metrics.get("last_validation", {})
         print(f"Resumed from {args.resume}: epoch={start_epoch}, global_step={global_step}, best_loss={best_loss:.6f}")
 
     wandb = maybe_init_wandb(args)
     config = vars(args).copy()
     config["model_config"] = model.config
+    evaluator = load_evaluator_for_training(args.meta_dir, device) if args.val_every > 0 else None
+    val_labels = load_validation_labels(args.meta_dir, device) if evaluator is not None else None
 
     stop_training = False
     for epoch in range(start_epoch, args.epochs + 1):
@@ -162,7 +262,14 @@ def train(args) -> None:
 
             optimizer.zero_grad(set_to_none=True)
             with autocast(device_type=device.type, enabled=device.type == "cuda"):
-                loss = diffusion.p_losses(model, images, timesteps, labels, cfg_drop_prob=args.cfg_drop_prob)
+                loss = diffusion.p_losses(
+                    model,
+                    images,
+                    timesteps,
+                    labels,
+                    cfg_drop_prob=args.cfg_drop_prob,
+                    loss_type=args.loss_type,
+                )
             scaler.scale(loss).backward()
             scaler.unscale_(optimizer)
             grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), args.grad_clip)
@@ -196,24 +303,60 @@ def train(args) -> None:
         avg_loss = loss_sum / max(1, num_batches)
         print(f"Epoch {epoch:03d}: avg_loss={avg_loss:.6f}")
 
-        last_path = save_dir / "last.pt"
-        save_checkpoint(last_path, model, optimizer, scheduler, scaler, ema, epoch, global_step, config, best_loss)
-        copy_to_backup(last_path, args.backup_dir)
-
         if avg_loss < best_loss:
             best_loss = avg_loss
-            best_path = save_dir / "best.pt"
-            best_ema_path = save_dir / "best_ema.pt"
-            save_checkpoint(best_path, model, optimizer, scheduler, scaler, ema, epoch, global_step, config, best_loss)
-            save_ema_checkpoint(best_ema_path, model, optimizer, scheduler, scaler, ema, epoch, global_step, config, best_loss)
-            copy_to_backup(best_path, args.backup_dir)
-            copy_to_backup(best_ema_path, args.backup_dir)
-            print(f"Best checkpoint saved: loss={best_loss:.6f}")
+            print(f"Best loss updated in memory: {best_loss:.6f}")
 
-        if args.save_every > 0 and epoch % args.save_every == 0:
-            epoch_path = save_dir / f"epoch_{epoch:03d}.pt"
-            save_checkpoint(epoch_path, model, optimizer, scheduler, scaler, ema, epoch, global_step, config, best_loss)
-            copy_to_backup(epoch_path, args.backup_dir)
+        if evaluator is not None and val_labels is not None and is_validation_epoch(args, epoch, stop_training):
+            test_acc, new_test_acc, avg_acc = run_evaluator_validation(
+                model,
+                diffusion,
+                ema,
+                evaluator,
+                val_labels[0],
+                val_labels[1],
+                args,
+                device,
+            )
+            last_val_metrics = {
+                "epoch": epoch,
+                "test_acc": test_acc,
+                "new_test_acc": new_test_acc,
+                "avg_acc": avg_acc,
+            }
+            print(f"Validation: test_acc={test_acc:.6f}, new_test_acc={new_test_acc:.6f}, avg_acc={avg_acc:.6f}")
+            if wandb:
+                wandb.log(
+                    {
+                        "val/test_acc": test_acc,
+                        "val/new_test_acc": new_test_acc,
+                        "val/avg_acc": avg_acc,
+                        "epoch": epoch,
+                        "global_step": global_step,
+                    },
+                    step=global_step,
+                )
+            if avg_acc > best_acc:
+                best_acc = avg_acc
+                metrics = {"best_acc": best_acc, "last_validation": last_val_metrics}
+                best_ema_path = save_dir / "best_ema.pt"
+                save_ema_checkpoint(best_ema_path, model, ema, epoch, global_step, config, best_loss, metrics=metrics)
+                print(f"Best EMA checkpoint updated locally by evaluator avg_acc={best_acc:.6f}: {best_ema_path}")
+
+        checkpoint_now = is_checkpoint_epoch(args, epoch, stop_training) or is_backup_epoch(args, epoch, stop_training)
+        last_path = save_dir / "last.pt"
+        last_ema_path = save_dir / "last_ema.pt"
+        metrics = {"best_acc": best_acc, "last_validation": last_val_metrics}
+        if checkpoint_now:
+            save_checkpoint(last_path, model, optimizer, scheduler, scaler, ema, epoch, global_step, config, best_loss, metrics=metrics)
+            save_ema_checkpoint(last_ema_path, model, ema, epoch, global_step, config, best_loss, metrics=metrics)
+            print(f"Checkpoints saved: {last_path}, {last_ema_path}")
+
+        if is_backup_epoch(args, epoch, stop_training):
+            copy_to_backup(last_path, args.backup_dir)
+            copy_to_backup(last_ema_path, args.backup_dir)
+            copy_to_backup(save_dir / "best_ema.pt", args.backup_dir)
+            print(f"Backed up checkpoints to Drive at epoch {epoch}.")
 
         if args.sample_every > 0 and epoch % args.sample_every == 0:
             save_preview(model, diffusion, ema, object_map, args, device, epoch)
@@ -224,7 +367,7 @@ def train(args) -> None:
 
     if wandb:
         wandb.finish()
-    print(f"Training finished. best_loss={best_loss:.6f}, global_step={global_step}")
+    print(f"Training finished. best_loss={best_loss:.6f}, best_acc={best_acc:.6f}, global_step={global_step}")
 
 
 def main() -> None:
@@ -234,6 +377,7 @@ def main() -> None:
     parser.add_argument("--meta-dir", type=str, default="file/file")
     parser.add_argument("--save-dir", type=str, default="/content/lab6_runs/baseline")
     parser.add_argument("--backup-dir", type=str, default=None)
+    parser.add_argument("--backup-every", type=int, default=50, help="Copy checkpoints to backup-dir every N epochs; 0 disables cloud backup.")
     parser.add_argument("--epochs", type=int, default=300)
     parser.add_argument("--batch-size", type=int, default=128)
     parser.add_argument("--lr", type=float, default=2e-4)
@@ -242,7 +386,8 @@ def main() -> None:
     parser.add_argument("--num-workers", type=int, default=4)
     parser.add_argument("--image-size", type=int, default=64)
     parser.add_argument("--timesteps", type=int, default=1000)
-    parser.add_argument("--beta-schedule", type=str, default="linear", choices=["linear", "cosine"])
+    parser.add_argument("--beta-schedule", type=str, default="cosine", choices=["linear", "cosine"])
+    parser.add_argument("--loss-type", type=str, default="huber", choices=["huber", "mse"])
     parser.add_argument("--base-channels", type=int, default=64)
     parser.add_argument("--channel-mults", type=str, default="1,2,4,4")
     parser.add_argument("--num-res-blocks", type=int, default=2)
@@ -251,10 +396,14 @@ def main() -> None:
     parser.add_argument("--cfg-drop-prob", type=float, default=0.1)
     parser.add_argument("--ema-decay", type=float, default=0.9999)
     parser.add_argument("--grad-clip", type=float, default=1.0)
-    parser.add_argument("--save-every", type=int, default=20)
-    parser.add_argument("--sample-every", type=int, default=20)
+    parser.add_argument("--save-every", type=int, default=50)
+    parser.add_argument("--sample-every", type=int, default=0)
     parser.add_argument("--preview-sample-steps", type=int, default=50)
     parser.add_argument("--preview-cfg-scale", type=float, default=2.0)
+    parser.add_argument("--val-every", type=int, default=25)
+    parser.add_argument("--val-sample-steps", type=int, default=100)
+    parser.add_argument("--val-cfg-scale", type=float, default=2.0)
+    parser.add_argument("--val-eta", type=float, default=0.0)
     parser.add_argument("--log-every", type=int, default=20)
     parser.add_argument("--max-steps", type=int, default=0)
     parser.add_argument("--resume", type=str, default=None)

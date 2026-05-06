@@ -73,6 +73,7 @@ def save_checkpoint(
     global_step: int,
     config: Dict[str, Any],
     best_loss: float,
+    metrics: Optional[Dict[str, Any]] = None,
 ) -> None:
     ensure_dir(Path(path).parent)
     checkpoint = {
@@ -85,6 +86,7 @@ def save_checkpoint(
         "ema": ema.state_dict() if ema is not None else None,
         "config": config,
         "best_loss": best_loss,
+        "metrics": metrics or {},
     }
     torch.save(checkpoint, path)
 
@@ -101,4 +103,3 @@ def backup_directory(src_dir: str | Path, dst_dir: Optional[str | Path]) -> None
     for path in src_dir.iterdir():
         if path.is_file():
             shutil.copy2(path, dst_dir / path.name)
-

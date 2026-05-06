@@ -128,7 +128,7 @@ def main() -> None:
     parser.add_argument("--denoise-frames", type=int, default=8)
     parser.add_argument("--image-size", type=int, default=64)
     parser.add_argument("--timesteps", type=int, default=1000)
-    parser.add_argument("--beta-schedule", type=str, default="linear", choices=["linear", "cosine"])
+    parser.add_argument("--beta-schedule", type=str, default="cosine", choices=["linear", "cosine"])
     parser.add_argument("--base-channels", type=int, default=64)
     parser.add_argument("--channel-mults", type=str, default="1,2,4,4")
     parser.add_argument("--num-res-blocks", type=int, default=2)

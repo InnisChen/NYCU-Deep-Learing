@@ -67,6 +67,7 @@ class GaussianDiffusion(nn.Module):
         timesteps: torch.Tensor,
         labels: torch.Tensor,
         cfg_drop_prob: float = 0.0,
+        loss_type: str = "huber",
     ) -> torch.Tensor:
         noise = torch.randn_like(x_start)
         x_noisy = self.q_sample(x_start=x_start, timesteps=timesteps, noise=noise)
@@ -74,7 +75,11 @@ class GaussianDiffusion(nn.Module):
             keep = (torch.rand(labels.shape[0], device=labels.device) > cfg_drop_prob).float()[:, None]
             labels = labels * keep
         predicted_noise = model(x_noisy, timesteps, labels)
-        return F.mse_loss(predicted_noise, noise)
+        if loss_type == "mse":
+            return F.mse_loss(predicted_noise, noise)
+        if loss_type == "huber":
+            return F.smooth_l1_loss(predicted_noise, noise)
+        raise ValueError("loss_type must be 'huber' or 'mse'")
 
     def predict_noise(self, model: nn.Module, x: torch.Tensor, timesteps: torch.Tensor, labels: torch.Tensor, cfg_scale: float) -> torch.Tensor:
         if cfg_scale == 1.0:
@@ -108,7 +113,6 @@ class GaussianDiffusion(nn.Module):
         num_intermediates: int = 8,
     ):
         device = labels.device
-        sample_steps = min(sample_steps, self.num_timesteps)
         image = torch.randn((labels.shape[0], channels, image_size, image_size), device=device)
         intermediates: List[torch.Tensor] = []
         capture = set(torch.linspace(self.num_timesteps - 1, 0, steps=num_intermediates).long().tolist())
@@ -135,6 +139,7 @@ class GaussianDiffusion(nn.Module):
         num_intermediates: int = 8,
     ):
         device = labels.device
+        sample_steps = min(sample_steps, self.num_timesteps)
         image = torch.randn((labels.shape[0], channels, image_size, image_size), device=device)
         times = torch.linspace(-1, self.num_timesteps - 1, steps=sample_steps + 1, device=device).long()
         times = list(reversed(times.tolist()))
