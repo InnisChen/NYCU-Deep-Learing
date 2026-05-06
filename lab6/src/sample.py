@@ -12,6 +12,10 @@ from .models import ConditionalUNet
 from .utils import ensure_dir, get_device, load_checkpoint, save_tensor_grid, save_tensor_image, set_seed
 
 
+def output_image_name(index: int) -> str:
+    return f"{index}.png"
+
+
 def parse_int_tuple(value):
     if isinstance(value, str):
         return tuple(int(v.strip()) for v in value.split(",") if v.strip())
@@ -73,7 +77,7 @@ def generate_split(args, split: str, model, diffusion, cfg, device) -> None:
             eta=args.eta,
         )
         for idx, image in enumerate(images):
-            save_tensor_image(image, split_dir / f"{idx:03d}.png")
+            save_tensor_image(image, split_dir / output_image_name(idx))
         save_tensor_grid(images, Path(args.out_dir) / f"{split}_grid.png", nrow=8)
         return
 
@@ -89,10 +93,10 @@ def generate_split(args, split: str, model, diffusion, cfg, device) -> None:
     )
     images = images.reshape(len(dataset), args.num_candidates, *images.shape[1:])
     for idx in range(len(dataset)):
-        item_dir = ensure_dir(candidate_root / f"{idx:03d}")
+        item_dir = ensure_dir(candidate_root / str(idx))
         for cand_idx in range(args.num_candidates):
-            save_tensor_image(images[idx, cand_idx], item_dir / f"{cand_idx:03d}.png")
-        save_tensor_image(images[idx, 0], split_dir / f"{idx:03d}.png")
+            save_tensor_image(images[idx, cand_idx], item_dir / output_image_name(cand_idx))
+        save_tensor_image(images[idx, 0], split_dir / output_image_name(idx))
     save_tensor_grid(images[:, 0], Path(args.out_dir) / f"{split}_grid.png", nrow=8)
 
 
@@ -118,7 +122,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Generate i-CLEVR test images with a trained DDPM.")
     parser.add_argument("--meta-dir", type=str, default="file/file")
     parser.add_argument("--ckpt", type=str, required=True)
-    parser.add_argument("--out-dir", type=str, default="/content/lab6_outputs")
+    parser.add_argument("--out-dir", type=str, default="/content/images")
     parser.add_argument("--split", type=str, default="both", choices=["test", "new_test", "both"])
     parser.add_argument("--sample-steps", type=int, default=100)
     parser.add_argument("--cfg-scale", type=float, default=2.0)
