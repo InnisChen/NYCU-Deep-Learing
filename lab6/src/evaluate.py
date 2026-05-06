@@ -196,49 +196,6 @@ def save_results_json(path: str | Path, args, results: List[Tuple[str, float]], 
     path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
 
-def save_results_image(path: str | Path, results: List[Tuple[str, float]], summary: Dict[str, object]) -> bool:
-    try:
-        import matplotlib.pyplot as plt
-    except Exception as exc:
-        print(f"Skipping results image: matplotlib unavailable ({exc})")
-        return False
-
-    threshold = float(summary["threshold"])
-    average = float(summary["average"])
-    rows = [[display_name(split), f"{acc:.6f}", "PASS" if acc >= threshold else "FAIL"] for split, acc in results]
-    if len(results) > 1:
-        rows.append(["Average", f"{average:.6f}", "-"])
-
-    fig, ax = plt.subplots(figsize=(7.6, 2.7))
-    ax.axis("off")
-    ax.text(0.5, 0.92, "Lab6 Conditional DDPM Evaluation", ha="center", va="center", fontsize=15, fontweight="bold")
-    ax.text(0.5, 0.82, f"Full-score bar: accuracy >= {threshold:.3f}", ha="center", va="center", fontsize=10)
-
-    table = ax.table(
-        cellText=rows,
-        colLabels=["Split", "Accuracy", "Status"],
-        cellLoc="center",
-        colLoc="center",
-        loc="center",
-        bbox=[0.08, 0.12, 0.84, 0.58],
-    )
-    table.auto_set_font_size(False)
-    table.set_fontsize(11)
-    for (row_idx, col_idx), cell in table.get_celld().items():
-        cell.set_edgecolor("#333333")
-        if row_idx == 0:
-            cell.set_facecolor("#f0f0f0")
-            cell.set_text_props(weight="bold")
-        elif col_idx == 2 and cell.get_text().get_text() == "PASS":
-            cell.set_text_props(color="#137333", weight="bold")
-        elif col_idx == 2 and cell.get_text().get_text() == "FAIL":
-            cell.set_text_props(color="#b3261e", weight="bold")
-
-    fig.savefig(path, dpi=220, bbox_inches="tight")
-    plt.close(fig)
-    return True
-
-
 def main() -> None:
     parser = argparse.ArgumentParser(description="Evaluate generated i-CLEVR images with the provided classifier.")
     parser.add_argument("--meta-dir", type=str, default="file/file")
@@ -248,7 +205,6 @@ def main() -> None:
     parser.add_argument("--num-candidates", type=int, default=4)
     parser.add_argument("--score-threshold", type=float, default=0.8)
     parser.add_argument("--no-save-results", action="store_true")
-    parser.add_argument("--no-results-image", action="store_true")
     args = parser.parse_args()
 
     evaluator = load_evaluator(args.meta_dir)
@@ -265,12 +221,9 @@ def main() -> None:
         output_dir = ensure_dir(args.image_dir)
         txt_path = output_dir / "evaluation_results.txt"
         json_path = output_dir / "evaluation_results.json"
-        png_path = output_dir / "evaluation_results.png"
         txt_path.write_text(report_text + "\n", encoding="utf-8")
         save_results_json(json_path, args, results, summary)
         saved_paths = [txt_path, json_path]
-        if not args.no_results_image and save_results_image(png_path, results, summary):
-            saved_paths.append(png_path)
         print("\nSaved evaluation summary:")
         for path in saved_paths:
             print(f" - {path}")

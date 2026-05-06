@@ -32,19 +32,6 @@ def parse_int_tuple(value: str):
     return tuple(int(v.strip()) for v in value.split(",") if v.strip())
 
 
-def maybe_init_wandb(args):
-    if not args.wandb_run_name:
-        return None
-    try:
-        import wandb
-
-        wandb.init(project=args.wandb_project, name=args.wandb_run_name, config=vars(args), save_code=True)
-        return wandb
-    except Exception as exc:  # pragma: no cover - logging fallback
-        print(f"W&B disabled: {exc}")
-        return None
-
-
 def build_model(args) -> ConditionalUNet:
     return ConditionalUNet(
         image_size=args.image_size,
@@ -243,7 +230,6 @@ def train(args) -> None:
         last_val_metrics = metrics.get("last_validation", {})
         print(f"Resumed from {args.resume}: epoch={start_epoch}, global_step={global_step}, best_loss={best_loss:.6f}")
 
-    wandb = maybe_init_wandb(args)
     config = vars(args).copy()
     config["model_config"] = model.config
     evaluator = load_evaluator_for_training(args.meta_dir, device) if args.val_every > 0 else None
@@ -284,18 +270,6 @@ def train(args) -> None:
             num_batches += 1
             progress.set_postfix(loss=f"{loss_value:.4f}", lr=f"{scheduler.get_last_lr()[0]:.2e}")
 
-            if wandb and global_step % args.log_every == 0:
-                wandb.log(
-                    {
-                        "train/loss": loss_value,
-                        "train/lr": scheduler.get_last_lr()[0],
-                        "train/grad_norm": float(grad_norm.detach().cpu().item() if torch.is_tensor(grad_norm) else grad_norm),
-                        "epoch": epoch,
-                        "global_step": global_step,
-                    },
-                    step=global_step,
-                )
-
             if args.max_steps > 0 and global_step >= args.max_steps:
                 stop_training = True
                 break
@@ -325,17 +299,6 @@ def train(args) -> None:
                 "avg_acc": avg_acc,
             }
             print(f"Validation: test_acc={test_acc:.6f}, new_test_acc={new_test_acc:.6f}, avg_acc={avg_acc:.6f}")
-            if wandb:
-                wandb.log(
-                    {
-                        "val/test_acc": test_acc,
-                        "val/new_test_acc": new_test_acc,
-                        "val/avg_acc": avg_acc,
-                        "epoch": epoch,
-                        "global_step": global_step,
-                    },
-                    step=global_step,
-                )
             if avg_acc > best_acc:
                 best_acc = avg_acc
                 metrics = {"best_acc": best_acc, "last_validation": last_val_metrics}
@@ -365,8 +328,6 @@ def train(args) -> None:
             print(f"Stopped at max_steps={args.max_steps}")
             break
 
-    if wandb:
-        wandb.finish()
     print(f"Training finished. best_loss={best_loss:.6f}, best_acc={best_acc:.6f}, global_step={global_step}")
 
 
@@ -404,11 +365,8 @@ def main() -> None:
     parser.add_argument("--val-sample-steps", type=int, default=100)
     parser.add_argument("--val-cfg-scale", type=float, default=2.0)
     parser.add_argument("--val-eta", type=float, default=0.0)
-    parser.add_argument("--log-every", type=int, default=20)
     parser.add_argument("--max-steps", type=int, default=0)
     parser.add_argument("--resume", type=str, default=None)
-    parser.add_argument("--wandb-run-name", type=str, default=None)
-    parser.add_argument("--wandb-project", type=str, default="DLP-Lab6-Conditional-DDPM")
     parser.add_argument("--seed", type=int, default=42)
     args = parser.parse_args()
     train(args)

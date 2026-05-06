@@ -1,7 +1,4 @@
 gdown
-wandb
 tqdm
-matplotlib
 pillow
 numpy
-
