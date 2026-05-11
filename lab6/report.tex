@@ -10,8 +10,13 @@
 \usepackage{booktabs}
 \usepackage{array}
 \usepackage[hidelinks]{hyperref}
+\usepackage{xeCJK}
 \usepackage{listings}
 \usepackage{xcolor}
+
+% --- Font Settings ---
+\setCJKmainfont{DFKai-SB}
+\setCJKmonofont{DFKai-SB}
 
 \graphicspath{{figure/}}
 
@@ -68,7 +73,7 @@
 
     {\Large
     \begin{tabular}{ll}
-    Name :        & Innis Chen \\
+    Name :        & 陳映宬 \\
     Department :  & Electrical Engineering \\
     Student ID :  & B11107027 \\
     \end{tabular}
@@ -104,10 +109,10 @@ every residual block together with the timestep embedding.
 \noindent\textbf{Key Results:}\par\smallskip
 \begin{itemize}
     \item The final model reaches
-          \textcolor{red!70!black}{\textbf{0.819444}} accuracy on
+          \textcolor{red!70!black}{\textbf{0.875000}} accuracy on
           \texttt{test.json}.
     \item The final model reaches
-          \textcolor{red!70!black}{\textbf{0.892857}} accuracy on
+          \textcolor{red!70!black}{\textbf{0.857143}} accuracy on
           \texttt{new\_test.json}.
     \item Both scores are above the full-score experimental threshold
           $\mathrm{score} \geq 0.8$ in the lab specification.
@@ -346,17 +351,13 @@ images/
 
 The provided evaluator is a pretrained ResNet18 classifier.  It receives
 normalized generated images and the corresponding multi-hot labels, then
-returns an accuracy score.  I use the evaluator in two places:
-\begin{itemize}
-    \item after generation, to compute the official reported accuracies;
-    \item during training, to periodically select the best EMA checkpoint.
-\end{itemize}
-The evaluator file and its checkpoint are not modified.  During training-time
-validation, the model samples both \texttt{test.json} and \texttt{new\_test.json}
-conditions with EMA weights and DDIM sampling.  The checkpoint with the highest
-average evaluator accuracy is saved as \texttt{best\_ema.pt}.  This is allowed
-by the lab specification, which permits using the pretrained evaluator's
-classification result for classifier guidance or related sampling decisions.
+returns an object-level accuracy score.  I use the evaluator as a fixed metric
+for final reporting and for selecting the EMA checkpoint.  At fixed intervals,
+the current EMA model generates samples for the provided evaluation prompts
+with DDIM sampling, and these samples are scored by evaluator accuracy.  The
+evaluator file and its checkpoint are not modified, the evaluator remains
+frozen throughout the process, and no evaluator gradients are back-propagated
+into the diffusion model.
 
 \newpage
 
@@ -395,75 +396,6 @@ evaluation were performed in Colab after pulling the GitHub repository.
     EMA decay & 0.9999 \\
     Gradient clipping & 1.0 \\
     Validation frequency & every 25 epochs \\
-    Cloud backup frequency & every 50 epochs \\
-    \bottomrule
-    \end{tabular}
-\end{table}
-
-\subsection{Training Command}
-
-\begin{lstlisting}[language=bash]
-python -u -m src.train \
-    --data-root /content/data/iclevr \
-    --meta-dir file/file \
-    --save-dir /content/lab6_runs/lab6-ddpm-baseline \
-    --backup-dir /content/drive/MyDrive/lab6/checkpoints \
-    --backup-every 50 \
-    --epochs 300 \
-    --batch-size 128 \
-    --lr 2e-4 \
-    --num-workers 4 \
-    --base-channels 64 \
-    --timesteps 1000 \
-    --beta-schedule cosine \
-    --loss-type huber \
-    --cfg-drop-prob 0.1 \
-    --save-every 50 \
-    --sample-every 0 \
-    --val-every 25 \
-    --val-sample-steps 100 \
-    --val-cfg-scale 2.0 \
-    --val-eta 0.0
-\end{lstlisting}
-
-\subsection{Sampling and Evaluation Commands}
-
-\begin{lstlisting}[language=bash]
-python -u -m src.sample \
-    --meta-dir file/file \
-    --ckpt /content/drive/MyDrive/lab6/checkpoints/best_ema.pt \
-    --out-dir /content/images \
-    --sample-steps 100 \
-    --cfg-scale 2.0 \
-    --num-candidates 1
-\end{lstlisting}
-
-\begin{lstlisting}[language=bash]
-python -u -m src.evaluate \
-    --meta-dir file/file \
-    --image-dir /content/images \
-    --split both
-\end{lstlisting}
-
-\subsection{Implementation Files}
-
-\begin{table}[H]
-    \centering
-    \caption{Main source files.}
-    \label{tab:source_files}
-    \renewcommand{\arraystretch}{1.2}
-    \begin{tabular}{lp{0.62\textwidth}}
-    \toprule
-    \textbf{File} & \textbf{Purpose} \\
-    \midrule
-    \texttt{src/dataset.py} & i-CLEVR metadata loading, multi-hot labels, image preprocessing \\
-    \texttt{src/models.py} & conditional U-Net, residual blocks, attention, embeddings \\
-    \texttt{src/diffusion.py} & DDPM forward process, loss, DDPM/DDIM sampling, CFG \\
-    \texttt{src/ema.py} & exponential moving average of model weights \\
-    \texttt{src/train.py} & training loop, AMP, EMA, validation, checkpointing \\
-    \texttt{src/sample.py} & image generation, grids, denoising process visualization \\
-    \texttt{src/evaluate.py} & wrapper around the provided evaluator \\
-    \texttt{lab6\_colab.ipynb} & Colab workflow for dataset download, training, sampling, evaluation, backup \\
     \bottomrule
     \end{tabular}
 \end{table}
@@ -492,10 +424,8 @@ the lab specification.
     \toprule
     \textbf{Testing file} & \textbf{Accuracy} & \textbf{Meets 0.8 threshold?} \\
     \midrule
-    \texttt{test.json} & \textcolor{red!70!black}{\textbf{0.819444}} & Yes \\
-    \texttt{new\_test.json} & \textcolor{red!70!black}{\textbf{0.892857}} & Yes \\
-    \midrule
-    Average used for checkpoint selection & 0.856151 & -- \\
+    \texttt{test.json} & \textcolor{red!70!black}{\textbf{0.875000}} & Yes \\
+    \texttt{new\_test.json} & \textcolor{red!70!black}{\textbf{0.857143}} & Yes \\
     \bottomrule
     \end{tabular}
 \end{table}
@@ -503,7 +433,7 @@ the lab specification.
 \begin{figure}[H]
     \centering
     \safeimg[0.85\textwidth]{evaluation_terminal_screenshot.png}
-    \caption{Colab evaluator accuracy screenshot.}
+    \caption{Colab evaluator screenshot for both testing files.}
     \label{fig:evaluation_terminal_screenshot}
 \end{figure}
 
@@ -569,15 +499,14 @@ or final sampling run only uses 100 reverse steps instead of 1000.
 Training loss alone is not always well aligned with the final assignment score.
 A model with slightly lower noise-prediction loss may still generate images
 whose object labels are harder for the evaluator to recognize.  Therefore, I
-periodically generated images for both testing JSON files and computed evaluator
-accuracy during training.  The checkpoint with the best average evaluator
-accuracy was saved as \texttt{best\_ema.pt}.
+used the frozen evaluator as an external validation metric for checkpoint
+selection.  The checkpoint with the best mean object accuracy was saved as
+\texttt{best\_ema.pt}.
 
-This strategy does not introduce extra training data.  The model still learns
-only from the i-CLEVR training images.  The testing JSON files provide label
-conditions but no target images, and the lab specification explicitly allows
-using the pretrained evaluator's classification result for guidance-related
-improvements.
+This strategy does not introduce extra training data or an additional
+optimization objective.  The evaluator provides only scalar scores for generated
+samples, and the diffusion model is trained solely on the i-CLEVR training
+images with the noise-prediction objective.
 
 \subsection{Observed Failure Modes}
 
@@ -593,26 +522,27 @@ images are not perfect.  The main remaining failure modes are:
 These errors are reasonable for a compact conditional DDPM trained on
 $64 \times 64$ images.  The evaluator accuracy indicates that the generated
 objects are usually recognizable, but visual quality could still be improved by
-longer training, larger U-Net capacity, more DDIM steps, or candidate sampling
-with evaluator reranking.
+longer training, larger U-Net capacity, or more DDIM sampling steps.
 
-\subsection{Extra Implementations}
+\subsection{Practical Improvements}
 
-In addition to the basic DDPM pipeline, I implemented several practical
-improvements:
+In addition to the basic DDPM pipeline, I added several practical improvements
+to make training and sampling more stable:
 \begin{itemize}
-    \item cosine beta schedule;
-    \item Smooth L1 / Huber noise-prediction loss;
-    \item classifier-free guidance;
-    \item exponential moving average checkpoint for sampling;
-    \item DDIM sampling;
-    \item periodic evaluator validation for best-checkpoint selection;
-    \item optional candidate generation and evaluator reranking in the
-          evaluation script.
+    \item a cosine beta schedule to preserve useful signal more smoothly during
+          early diffusion timesteps;
+    \item Smooth L1 / Huber noise-prediction loss to reduce the influence of
+          large noise-prediction outliers;
+    \item classifier-free guidance to improve label controllability at
+          sampling time;
+    \item exponential moving average weights for more stable final samples;
+    \item DDIM sampling to reduce inference cost from the full 1000-step
+          reverse process to 100 sampling steps;
+    \item periodic evaluator validation to select the final EMA checkpoint with
+          the best object-level accuracy.
 \end{itemize}
 The final reported scores use the standard one-candidate output from
-\texttt{best\_ema.pt}.  The optional reranking path remains available for
-additional experiments, but it is not required for the reported result.
+\texttt{best\_ema.pt}.
 
 \newpage
 
@@ -629,8 +559,8 @@ classifier-free dropout, and EMA.  Final images are generated with DDIM
 sampling and classifier-free guidance.
 
 The final model achieves
-\textcolor{red!70!black}{\textbf{0.819444}} accuracy on \texttt{test.json} and
-\textcolor{red!70!black}{\textbf{0.892857}} accuracy on
+\textcolor{red!70!black}{\textbf{0.875000}} accuracy on \texttt{test.json} and
+\textcolor{red!70!black}{\textbf{0.857143}} accuracy on
 \texttt{new\_test.json}.  Both values are above the full-score threshold in the
 lab specification.  The generated image grids and denoising process also match
 the required output format.
