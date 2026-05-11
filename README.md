@@ -11,6 +11,7 @@ implementation to experiment tracking, evaluation, and final reporting.
 | --- | --- | --- | --- |
 | [Lab 2](lab2) | Binary Semantic Segmentation | Implemented U-Net and ResNet34-UNet from scratch for Oxford-IIIT Pet foreground segmentation. Built dataset loading, preprocessing, BCE + Dice loss training, validation, inference, and Kaggle submission scripts. | U-Net reached best validation Dice `0.9187`. Both U-Net and ResNet34-UNet checkpoints and Kaggle submission pipelines are included. |
 | [Lab 5](lab5) | Value-based Reinforcement Learning | Implemented DQN for CartPole and Atari Pong, then extended it with Double DQN, Prioritized Experience Replay, multi-step returns, and Dueling DQN. Used W&B for training curves and evaluation tracking. | CartPole achieved `500.00` average reward over seeds 0-19. Vanilla Pong DQN reached `19.05` average reward. Enhanced DQN reached `19.10` at 600k steps and `20.15` at 1.5M steps. |
+| [Lab 6](lab6) | Conditional Image Generation | Implemented a conditional DDPM for i-CLEVR using a PyTorch U-Net, cosine noise schedule, classifier-free guidance, EMA weights, DDIM sampling, and evaluator-based checkpoint selection. | Reached evaluator accuracy `0.875000` on `test.json` and `0.857143` on `new_test.json`. Generated ordered PNG outputs, testing grids, and a denoising process grid. |
 
 ## Repository Layout
 
@@ -30,7 +31,7 @@ implementation to experiment tracking, evaluation, and final reporting.
 |   |-- requirements.txt
 |   `-- Lab2_Binary_Semantic_Segmentation_2026_Spring.pdf
 |
-`-- lab5/
+|-- lab5/
     |-- LAB5_B11107027_Code/
     |   |-- dqn.py
     |   |-- test_model.py
@@ -42,6 +43,22 @@ implementation to experiment tracking, evaluation, and final reporting.
     |-- report.tex
     |-- LAB5_B11107027.pdf
     `-- LAB5_B11107027.zip
+
+`-- lab6/
+    |-- src/
+    |   |-- dataset.py
+    |   |-- diffusion.py
+    |   |-- ema.py
+    |   |-- evaluate.py
+    |   |-- models.py
+    |   |-- sample.py
+    |   |-- train.py
+    |   |-- utils.py
+    |   `-- __init__.py
+    |-- images/
+    |-- requirements.txt
+    |-- README.md
+    `-- DL_LAB6_B11107027_陳映宬_report.pdf
 ```
 
 ## Lab 2: Binary Semantic Segmentation
@@ -94,6 +111,32 @@ and no multi-step return, plus additional bonus analysis for dueling networks,
 learning-rate decay, n-step choices, soft target updates, and target update
 frequency.
 
+## Lab 6: Conditional DDPM for i-CLEVR
+
+Lab 6 implements a conditional DDPM to generate i-CLEVR images from multi-label
+object conditions.
+
+Implemented components:
+
+- i-CLEVR dataset loader and multi-hot condition encoding.
+- Conditional U-Net noise predictor with residual blocks and self-attention.
+- Sinusoidal timestep embeddings and MLP-based condition embeddings.
+- DDPM training with a cosine beta schedule and Huber noise-prediction loss.
+- Classifier-free guidance by randomly dropping conditions during training.
+- EMA parameter tracking for more stable sampling.
+- DDIM sampling for faster generation.
+- Evaluation script using the provided frozen ResNet18 evaluator.
+
+Key results:
+
+| Split | Accuracy |
+| --- | ---: |
+| `test.json` | `0.875000` |
+| `new_test.json` | `0.857143` |
+
+The generated image folder contains ordered PNG files for both testing splits,
+two synthetic image grids, and the required denoising process grid.
+
 ## Reproducing Experiments
 
 Each lab has its own dependency file.
@@ -115,6 +158,15 @@ pip install -r requirements.txt
 bash eval_task1.sh
 bash eval_task2.sh
 bash eval_task3.sh
+```
+
+Lab 6:
+
+```bash
+cd lab6
+pip install -r requirements.txt
+python -m src.sample --meta-dir file/file --ckpt /path/to/best_ema.pt --out-dir /content/images --split both
+python -m src.evaluate --meta-dir file/file --image-dir /content/images --split both
 ```
 
 ## Notes
